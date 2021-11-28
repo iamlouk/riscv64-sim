@@ -1,6 +1,6 @@
 CC = clang
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -std=c11 -g -nostdlib
-WASM_CFLAGS = -Wall -Wextra -Wno-unused-parameter --target=wasm32-unkown-unkown -nostdlib
+WASM_CFLAGS = -Wall -Wextra -O3 -Wno-unused-parameter --target=wasm32-unkown-unkown -nostdlib
 WASM_LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--lto-O2
 
 SRCFILES = $(find . -name "*.c")

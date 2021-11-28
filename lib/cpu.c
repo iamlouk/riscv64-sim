@@ -45,6 +45,7 @@ int run_instruction(struct cpu *cpu) {
 	if ((ins.flags & RISCV_FLAG_JUMP) == 0x0)
 		cpu->pc += ins.size;
 
+	cpu->regs[0] = 0x0;
 	return 0;
 }
 

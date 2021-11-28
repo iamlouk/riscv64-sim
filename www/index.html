@@ -1,0 +1,164 @@
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shitty RISC-V WebAssembly Simulator</title>
+  <style>
+    html {
+      font-family: monospace;
+    }
+  
+    td {
+      border: 1px solid black;
+    }
+  </style>
+</head>
+<body>
+  <table>
+    <tr>
+      <td>
+        ELF executable: <i id="current-executable">None selected...</i>
+      </td>
+      <td>
+        Examples: <button id="load-loop-elf"><code>loop.elf</code></button>
+      </td>
+      <td>
+        <button id="start-stop">Start</button>
+      </td>
+      <td>
+        I=<span id="executed-instructions">/</span>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="4">
+        <table>
+          <tr>
+            <td>Register</td><td>Value</td>
+          </tr>
+          <tr><td>PC</td><td id="reg-pc"></td></tr>
+          <tr><td>0 (zero)</td><td id="reg-0"></td></tr>
+          <tr><td>1 (ra)</td><td id="reg-1"></td></tr>
+          <tr><td>2</td><td id="reg-2"></td></tr>
+          <tr><td>3</td><td id="reg-3"></td></tr>
+          <tr><td>4</td><td id="reg-4"></td></tr>
+          <tr><td>5 (t1)</td><td id="reg-5"></td></tr>
+          <tr><td>6 (t2)</td><td id="reg-6"></td></tr>
+          <tr><td>7 (t3)</td><td id="reg-7"></td></tr>
+          <tr><td>8</td><td id="reg-8"></td></tr>
+          <tr><td>9</td><td id="reg-9"></td></tr>
+          <tr><td>10</td><td id="reg-10"></td></tr>
+          <tr><td>11</td><td id="reg-11"></td></tr>
+          <tr><td>12</td><td id="reg-12"></td></tr>
+          <tr><td>13</td><td id="reg-13"></td></tr>
+          <tr><td>14</td><td id="reg-14"></td></tr>
+          <tr><td>15</td><td id="reg-15"></td></tr>
+          <tr><td>16</td><td id="reg-16"></td></tr>
+          <tr><td>17</td><td id="reg-17"></td></tr>
+          <tr><td>18</td><td id="reg-18"></td></tr>
+          <tr><td>19</td><td id="reg-19"></td></tr>
+          <tr><td>20</td><td id="reg-20"></td></tr>
+          <tr><td>21</td><td id="reg-21"></td></tr>
+          <tr><td>22</td><td id="reg-22"></td></tr>
+          <tr><td>23</td><td id="reg-23"></td></tr>
+          <tr><td>24</td><td id="reg-24"></td></tr>
+          <tr><td>25</td><td id="reg-25"></td></tr>
+          <tr><td>26</td><td id="reg-26"></td></tr>
+          <tr><td>27</td><td id="reg-27"></td></tr>
+          <tr><td>28</td><td id="reg-28"></td></tr>
+          <tr><td>29</td><td id="reg-29"></td></tr>
+          <tr><td>30</td><td id="reg-30"></td></tr>
+          <tr><td>31</td><td id="reg-31"></td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <script type="module">
+    const startStopBtn = document.querySelector('#start-stop')
+    const executedInstructionsSpan = document.querySelector('#executed-instructions')
+    const currentExecutableSpan = document.querySelector('#current-executable')
+    const pcRegTd = document.querySelector('#reg-pc')
+    const gpRegTds = [];
+    for (let i = 0; i < 32; i++)
+      gpRegTds.push(document.querySelector(`#reg-${i}`))
+
+    let executedInstructions;
+    let wasmInstance;
+    let loopId = null;
+    let somethingLoaded = false;
+
+    function updateUI() {
+      executedInstructionsSpan.innerText = executedInstructions.toString()
+      pcRegTd.innerText = wasmInstance.exports.riscv_sim_get_pc().toString()
+      for (let i = 0; i < 32; i++)
+        gpRegTds[i].innerText = wasmInstance.exports.riscv_sim_get_reg(i).toString()
+    }
+
+    function loop() {
+      executedInstructions += 1
+      let retval = wasmInstance.exports.riscv_sim_next()
+      updateUI()
+      if (retval != 0) {
+        console.error(`riscv_sim_next failed: code=${retval}`)
+        stop()
+      }
+    }
+
+    function start() {
+      if (loopId != null || !somethingLoaded)
+        return
+
+      startStopBtn.innerText = 'Stop'
+      loopId = setInterval(loop, 500)
+    }
+
+    function stop() {
+      if (loopId == null)
+        return
+
+      clearInterval(loopId)
+      startStopBtn.innerText = 'Start'
+      loopId = null
+    }
+
+    async function loadBinary(name, binary) {
+      currentExecutableSpan.innerText = name
+      executedInstructions = 0
+
+      const cBufferPtr = wasmInstance.exports.riscv_sim_get_buffer(binary.byteLength)
+      const cBuffer = new Uint8Array(
+        wasmInstance.exports.memory.buffer,
+        cBufferPtr,
+        binary.byteLength)
+      cBuffer.set(new Uint8Array(binary))
+
+      let retval = wasmInstance.exports.riscv_sim_load_elf(cBufferPtr)
+      if (retval != 0) {
+        console.error(`riscv_sim_load_elf failed: code=${retval}`)
+        return
+      }
+
+      somethingLoaded = true
+      updateUI()
+      start()
+    }
+
+    async function init() {
+      const { instance } = await WebAssembly.instantiateStreaming(fetch('./libriscvsim.wasm'))
+      wasmInstance = instance;
+
+      document.querySelector('#load-loop-elf').addEventListener('click', () =>
+        fetch('./examples/loop.elf').then(res => res.arrayBuffer()).then(buf => loadBinary('loop.elf', buf)))
+
+      startStopBtn.addEventListener('click', () => {
+        if (loopId == null)
+          start()
+        else
+          stop()
+      })
+    }
+
+    init()
+  </script>
+</body>
+</html>

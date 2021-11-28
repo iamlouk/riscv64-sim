@@ -8,6 +8,8 @@ int strcmp(const char *a, const char *b) {
 		if (a[i] == b[i]) {
 			if (a[i] == '\0')
 				return 0;
+
+			i++;
 			continue;
 		}
 
@@ -23,10 +25,10 @@ void *memset(void *s, int c, size_t n) {
 	return s;
 }
 
-void *memcpy(void *restrict dest, const void *restrict src, unsigned long n) {
+void *memcpy(void *restrict dest, const void *restrict src, size_t n) {
 	char *restrict cdest = dest;
 	const char *restrict csrc = src;
-	for (unsigned long i = 0; i < n; i++)
+	for (size_t i = 0; i < n; i++)
 		cdest[i] = csrc[i];
 	return dest;
 }
