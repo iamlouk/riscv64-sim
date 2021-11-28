@@ -31,6 +31,11 @@
     </tr>
     <tr>
       <td colspan="4">
+        Current Instruction: <code id="current-instruction">None</code>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="4">
         <table>
           <tr>
             <td>Register</td><td>Value</td>
@@ -77,17 +82,19 @@
     const startStopBtn = document.querySelector('#start-stop')
     const executedInstructionsSpan = document.querySelector('#executed-instructions')
     const currentExecutableSpan = document.querySelector('#current-executable')
+    const currentInstruction = document.querySelector('#current-instruction')
     const pcRegTd = document.querySelector('#reg-pc')
     const gpRegTds = [];
     for (let i = 0; i < 32; i++)
       gpRegTds.push(document.querySelector(`#reg-${i}`))
 
-    let executedInstructions;
-    let wasmInstance;
+    let executedInstructions = 0;
+    let wasmInstance = null;
     let loopId = null;
     let somethingLoaded = false;
 
     function updateUI() {
+      currentInstruction.innerText = getCurrentInstructionString()
       executedInstructionsSpan.innerText = executedInstructions.toString()
       pcRegTd.innerText = wasmInstance.exports.riscv_sim_get_pc().toString()
       for (let i = 0; i < 32; i++)
@@ -119,6 +126,24 @@
       clearInterval(loopId)
       startStopBtn.innerText = 'Start'
       loopId = null
+    }
+
+    function getCurrentInstructionString() {
+      const maxLen = 100;
+      const cBufferPtr = wasmInstance.exports.riscv_sim_get_buffer(maxLen)
+      const cBuffer = new Uint8Array(wasmInstance.exports.memory.buffer, cBufferPtr, maxLen)
+      const len = wasmInstance.exports.riscv_sim_current_instruction_to_buf();
+
+      let str = ''
+      for (let i = 0; i < len; i++) {
+        let c = cBuffer[i]
+        if (c == 0)
+          break
+
+        str += String.fromCharCode(c)
+      }
+
+      return str
     }
 
     async function loadBinary(name, binary) {

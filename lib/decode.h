@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "minilib.h"
+
 enum instruction_t {
 	RISCV_INVALID,
 	RISCV_UNKOWN,
@@ -72,6 +74,12 @@ enum instruction_t {
 
 #define RISCV_FLAG_JUMP       (1 << 0)
 #define RISCV_FLAG_COMPRESSED (1 << 1)
+#define RISCV_FLAG_R_TYPE     (1 << 2)
+#define RISCV_FLAG_I_TYPE     (1 << 3)
+#define RISCV_FLAG_S_TYPE     (1 << 4)
+#define RISCV_FLAG_B_TYPE     (1 << 5)
+#define RISCV_FLAG_U_TYPE     (1 << 6)
+#define RISCV_FLAG_J_TYPE     (1 << 7)
 
 struct instruction {
 	enum instruction_t id;
@@ -85,13 +93,7 @@ struct instruction {
 	} operands[3];
 };
 
-unsigned long riscv_decode(
-		struct instruction **insnptr,
-		const char *data,
-		unsigned long size,
-		int64_t first_address);
-
-unsigned long riscv_decode_single(
+size_t riscv_decode_single(
 	struct instruction *ins,
 	const char *data,
 	int64_t off);

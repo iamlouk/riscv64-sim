@@ -24,6 +24,7 @@ struct decode_table_entry {
 };
 
 static void decode_i_type(struct instruction *inst, int32_t raw) {
+	inst->flags |= RISCV_FLAG_I_TYPE;
 	inst->op_count = 3;
 	inst->operands[0].reg = get_rd(raw);
 	inst->operands[1].reg = get_rs1(raw);
@@ -31,6 +32,7 @@ static void decode_i_type(struct instruction *inst, int32_t raw) {
 }
 
 static void decode_s_type(struct instruction *inst, int32_t raw) {
+	inst->flags |= RISCV_FLAG_S_TYPE;
 	inst->op_count = 3;
 	inst->operands[0].reg = get_rs1(raw);
 	inst->operands[1].reg = get_rs2(raw);
@@ -40,7 +42,7 @@ static void decode_s_type(struct instruction *inst, int32_t raw) {
 }
 
 static void decode_b_type(struct instruction *inst, int32_t raw) {
-	inst->flags |= RISCV_FLAG_JUMP;
+	inst->flags |= RISCV_FLAG_JUMP | RISCV_FLAG_B_TYPE;
 	inst->op_count = 3;
 	inst->operands[0].reg = get_rs1(raw);
 	inst->operands[1].reg = get_rs2(raw);
@@ -52,6 +54,7 @@ static void decode_b_type(struct instruction *inst, int32_t raw) {
 }
 
 static void decode_u_type(struct instruction *inst, int32_t raw) {
+	inst->flags |= RISCV_FLAG_U_TYPE;
 	inst->op_count = 2;
 	inst->operands[0].reg = get_rd(raw);
 	inst->operands[1].imm = sign_extend((raw & 0xfffff000), 32);
@@ -59,7 +62,7 @@ static void decode_u_type(struct instruction *inst, int32_t raw) {
 
 static void decode_j_type(struct instruction *inst, int32_t raw) {
 	inst->id = RISCV_JAL;
-	inst->flags |= RISCV_FLAG_JUMP;
+	inst->flags |= RISCV_FLAG_JUMP | RISCV_FLAG_J_TYPE;
 	inst->op_count = 2;
 	inst->operands[0].reg = get_rd(raw);
 	inst->operands[1].imm = sign_extend(
@@ -181,55 +184,4 @@ size_t riscv_decode_single(
 
 	return 4;
 }
-
-#if 0
-size_t riscv_decode(
-		struct instruction **insnptr, const char *data,
-		size_t size, int64_t start_address) {
-
-	size_t n = 0, off = 0, cap = (size / 4) + 1;
-	struct instruction *insns = malloc(cap * sizeof(struct instruction));
-	while (off < size) {
-		if (n + 1 == cap) {
-			cap *= 2;
-			insns = realloc(insns, cap * sizeof(struct instruction));
-		}
-
-		struct instruction *ins = &insns[n];
-		memset(ins, 0, sizeof(struct instruction));
-		ins->address = start_address + off;
-		if ((data[off] & 0x3) != 0x3) {
-			ins->flags |= RISCV_FLAG_COMPRESSED;
-			ins->id = RISCV_UNKOWN;
-			ins->size = 2;
-			n += 1;
-			off += 2;
-			continue;
-		}
-
-		ins->size = 4;
-		uint32_t raw = (data[off] & 0xff)
-			| ((data[off + 1] & 0xff) <<  8)
-			| ((data[off + 2] & 0xff) << 16)
-			| ((data[off + 3] & 0xff) << 24);
-
-		n += 1;
-		off += 4;
-		size_t opcode = (raw & 0b1111100) >> 2;
-		if (opcode >= (sizeof(decode_table) / sizeof(decode_table[0])) || decode_table[opcode].decode_type == NULL) {
-			ins->id = RISCV_UNKOWN;
-			continue;
-		}
-
-		struct decode_table_entry *dte = &decode_table[opcode];
-		ins->id = dte->funct3_table[get_funct3(raw)];
-		dte->decode_type(ins, raw);
-		if (dte->special_case != NULL)
-			dte->special_case(ins, raw, dte);
-	}
-
-	*insnptr = insns;
-	return n;
-}
-#endif
 

@@ -25,17 +25,26 @@ uint64_t riscv_sim_get_reg(int reg) {
 	return cpu.regs[reg];
 }
 
+struct instruction cins;
+
 int riscv_sim_next() {
-	return run_instruction(&cpu);
+	int ret;
+	if ((ret = cpu_current_instruction(&cpu, &cins)) != 0)
+		return ret;
+
+	if ((ret = cpu_run_instruction(&cpu, &cins)) != 0)
+		return ret;
+
+	return 0;
 }
 
 #define BUFFER_SIZE (1 << 20)
-static char priv_buffer[BUFFER_SIZE];
+static char buf[BUFFER_SIZE];
 void *riscv_sim_get_buffer(size_t s) {
-	return (void*)priv_buffer;
+	return buf;
 }
 
-int get_byte(const unsigned char *buf, size_t n) {
-	return buf[n];
+int riscv_sim_current_instruction_to_buf() {
+	return instruction_as_string(buf, &cins);
 }
 

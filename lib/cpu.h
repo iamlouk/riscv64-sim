@@ -12,5 +12,9 @@ struct cpu {
 	char *mem;
 };
 
-int run_instruction(struct cpu *cpu);
+int cpu_current_instruction(struct cpu *cpu, struct instruction *ins);
+
+int cpu_run_instruction(struct cpu *cpu, struct instruction *ins);
+
+int instruction_as_string(char *buf, struct instruction *ins);
 

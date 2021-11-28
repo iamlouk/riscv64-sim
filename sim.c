@@ -58,8 +58,17 @@ int main(int argc, char *argv[]) {
 		fprintf(stdout, "PC:%06lx\tt0=%08lx, t1=%08lx, t2=%08lx\n",
 			cpu.pc, cpu.regs[5], cpu.regs[6], cpu.regs[7]);
 
+		struct instruction ins;
+		if (cpu_current_instruction(&cpu, &ins) != 0)
+			fatal("fetching instruction failed\n");
+
+		char buf[124];
+		instruction_as_string(buf, &ins);
+		fprintf(stdout, "\t%s\n", buf);
+
 		int64_t prev_pc = cpu.pc;
-		run_instruction(&cpu);
+		if (cpu_run_instruction(&cpu, &ins) != 0)
+			fatal("executing instruction failed\n");
 		if (cpu.pc == prev_pc)
 			break;
 	}
