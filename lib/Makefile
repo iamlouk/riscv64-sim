@@ -1,6 +1,6 @@
 CC = clang
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -std=c11 -g
-WASM_CFLAGS = -Wall -Wextra --target=wasm32-unkown-unkown -nostdlib
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -std=c11 -g -nostdlib
+WASM_CFLAGS = -Wall -Wextra -Wno-unused-parameter --target=wasm32-unkown-unkown -nostdlib
 WASM_LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--lto-O2
 
 SRCFILES = $(find . -name "*.c")
@@ -18,11 +18,11 @@ all: decode-test libriscvsim.wasm libriscvsim.so
 libriscvsim.so: $(SRCFILES:.c=.native.o)
 	$(CC) $(CFLAGS) -o $@ $^
 
-libriscvsim.wasm: $(SRCFILES:.c=.wasm)
+libriscvsim.wasm: ./cpu.c ./decode.c ./loader.c ./wasm-interface.c ./minilib.c
 	$(CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $^
 
 decode-test: ./decode.test.c ./decode.c
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) -Wall -Werror -Wno-unused-parameter -std=c11 -o $@ $^
 
 ./decode.c: ./decode.h
 

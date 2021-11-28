@@ -1,8 +1,6 @@
 #pragma once
 
-#include <stdlib.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "cpu.h"
 #include "elf.h"

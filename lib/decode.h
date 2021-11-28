@@ -1,6 +1,5 @@
 #pragma once
 
-#include <stdlib.h>
 #include <stdint.h>
 
 enum instruction_t {
@@ -86,13 +85,13 @@ struct instruction {
 	} operands[3];
 };
 
-size_t riscv_decode(
+unsigned long riscv_decode(
 		struct instruction **insnptr,
 		const char *data,
-		size_t size,
+		unsigned long size,
 		int64_t first_address);
 
-size_t riscv_decode_single(
+unsigned long riscv_decode_single(
 	struct instruction *ins,
 	const char *data,
 	int64_t off);

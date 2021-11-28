@@ -1,5 +1,6 @@
 *.o
 *.elf
+*.wasm
 /sim
 /lib/decode-test
 

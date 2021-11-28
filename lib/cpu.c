@@ -1,8 +1,5 @@
-#include <stdlib.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdbool.h>
-#include <assert.h>
 
 #include "decode.h"
 #include "cpu.h"
@@ -36,17 +33,18 @@ static const struct instruction_table_entry instructions[] = {
 	[RISCV_ADDI] = { .name = "addi", .eval = eval_addi },
 };
 
-void run_instruction(struct cpu *cpu) {
+int run_instruction(struct cpu *cpu) {
 	struct instruction ins;
 	riscv_decode_single(&ins, cpu->mem, cpu->pc);
 	if (ins.id >= (sizeof(instructions) / sizeof(instructions[0])) || instructions[ins.id].eval == NULL) {
-		assert(false);
-		return;
+		return -1;
 	}
 
 	cpu->regs[0] = 0x0;
 	instructions[ins.id].eval(cpu, &ins);
 	if ((ins.flags & RISCV_FLAG_JUMP) == 0x0)
 		cpu->pc += ins.size;
+
+	return 0;
 }
 

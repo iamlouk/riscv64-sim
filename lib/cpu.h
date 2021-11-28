@@ -1,8 +1,8 @@
 #pragma once
 
-#include <stdlib.h>
 #include <stdint.h>
 
+#include "minilib.h"
 #include "decode.h"
 
 struct cpu {
@@ -12,5 +12,5 @@ struct cpu {
 	char *mem;
 };
 
-void run_instruction(struct cpu *cpu);
+int run_instruction(struct cpu *cpu);
 

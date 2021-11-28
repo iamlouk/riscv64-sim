@@ -1,11 +1,8 @@
-#include <stdlib.h>
-#include <stdio.h>
 #include <stdint.h>
-#include <assert.h>
 #include <stdbool.h>
-#include <string.h>
 
-#include "./decode.h"
+#include "minilib.h"
+#include "decode.h"
 
 static inline int64_t sign_extend(int64_t x, unsigned int sign_bit) {
 	int64_t m = 1lu << (sign_bit - 1lu);
@@ -88,9 +85,8 @@ static void decode_auipc(
 static void decode_jalr(
 		struct instruction *inst, int32_t raw,
 		struct decode_table_entry *table_entry) {
-	inst->id = RISCV_JALR;
+	inst->id = get_funct3(raw) == 0x0 ? RISCV_JALR : RISCV_UNKOWN;
 	inst->flags |= RISCV_FLAG_JUMP;
-	assert(get_funct3(raw) == 0x0);
 }
 
 static struct decode_table_entry decode_table[] = {
@@ -186,6 +182,7 @@ size_t riscv_decode_single(
 	return 4;
 }
 
+#if 0
 size_t riscv_decode(
 		struct instruction **insnptr, const char *data,
 		size_t size, int64_t start_address) {
@@ -234,4 +231,5 @@ size_t riscv_decode(
 	*insnptr = insns;
 	return n;
 }
+#endif
 

@@ -26,14 +26,14 @@ static const char data[] = {
 static const struct instruction expected[] = {
 	{
 		.id = RISCV_LUI,
-		.address = 1000,
+		.address = 0,
 		.op_count = 2,
 		.operands[0].reg = 24,
 		.operands[1].imm = 0x3c
 	},
 	{
 		.id = RISCV_JAL,
-		.address = 1004,
+		.address = 4,
 		.flags = RISCV_FLAG_JUMP,
 		.op_count = 2,
 		.operands[0].reg = 0,
@@ -41,7 +41,7 @@ static const struct instruction expected[] = {
 	},
 	{
 		.id = RISCV_BLT,
-		.address = 1008,
+		.address = 8,
 		.flags = RISCV_FLAG_JUMP,
 		.op_count = 3,
 		.operands[0].reg = 5,
@@ -50,7 +50,7 @@ static const struct instruction expected[] = {
 	},
 	{
 		.id = RISCV_BEQ,
-		.address = 1012,
+		.address = 12,
 		.flags = RISCV_FLAG_JUMP,
 		.op_count = 3,
 		.operands[0].reg = 6,
@@ -59,7 +59,7 @@ static const struct instruction expected[] = {
 	},
 	{
 		.id = RISCV_JAL,
-		.address = 1016,
+		.address = 16,
 		.flags = RISCV_FLAG_JUMP,
 		.op_count = 2,
 		.operands[0].reg = 0,
@@ -67,7 +67,7 @@ static const struct instruction expected[] = {
 	},
 	{
 		.id = RISCV_BLT,
-		.address = 1020,
+		.address = 20,
 		.flags = RISCV_FLAG_JUMP,
 		.op_count = 3,
 		.operands[0].reg = 14,
@@ -76,7 +76,7 @@ static const struct instruction expected[] = {
 	},
 	{
 		.id = RISCV_JAL,
-		.address = 1024,
+		.address = 24,
 		.flags = RISCV_FLAG_JUMP,
 		.op_count = 2,
 		.operands[0].reg = 0,
@@ -85,25 +85,24 @@ static const struct instruction expected[] = {
 };
 
 int main() {
-	struct instruction *insns;
-	size_t count = riscv_decode(&insns, data, sizeof(data), 1000);
-	if (count != (sizeof(expected) / sizeof(expected[0])))
-		fatal("test: wrong instruction count\n");
-
-	for (size_t i = 0; i < count; i++) {
-		const struct instruction *ins = &insns[i];
+	struct instruction ins;
+	int64_t off = 0;
+	size_t n = sizeof(expected) / sizeof(expected[0]);
+	for (size_t i = 0; i < n; i++) {
 		const struct instruction *exp = &expected[i];
-		if (ins->id != exp->id)
+		off += riscv_decode_single(&ins, data, off);
+
+		if (ins.id != exp->id)
 			fatal("test #%04lu: instruction id mismatch\n", i);
 
-		if (ins->address != exp->address || ins->flags != exp->flags)
+		if (ins.address != exp->address || ins.flags != exp->flags)
 			fatal("test #%04lu: address or flags mismatch\n", i);
 
-		if (ins->op_count != exp->op_count)
+		if (ins.op_count != exp->op_count)
 			fatal("test #%04lu: wrong operand count\n", i);
 
-		for (int op = 0; op < ins->op_count; op++) {
-			if (ins->operands[op].imm != exp->operands[op].imm)
+		for (int op = 0; op < ins.op_count; op++) {
+			if (ins.operands[op].imm != exp->operands[op].imm)
 				fatal("test #%04lu: operand #%d does not match\n", i, op);
 		}
 	}

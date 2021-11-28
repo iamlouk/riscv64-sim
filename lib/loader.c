@@ -1,10 +1,6 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <stdint.h>
-#include <string.h>
-#include <errno.h>
-#include <assert.h>
 
+#include "minilib.h"
 #include "elf.h"
 #include "cpu.h"
 #include "loader.h"
@@ -23,13 +19,11 @@ int load_binary(struct cpu *cpu, const char *binary) {
 		|| ehdr->e_ident[EI_MAG2] != ELFMAG2
 		|| ehdr->e_ident[EI_MAG3] != ELFMAG3
 		|| ehdr->e_ident[EI_CLASS] != ELFCLASS64) {
-		errno = EINVAL;
 		return -1;
 	}
 
 	if (ehdr->e_type != ET_EXEC
 		|| ehdr->e_machine != EM_RISCV) {
-		errno = EINVAL;
 		return -2;
 	}
 
@@ -47,11 +41,12 @@ int load_binary(struct cpu *cpu, const char *binary) {
 	}
 
 	if (textshdr == NULL) {
-		errno = ENODATA;
 		return -3;
 	}
 
-	assert(ehdr->e_entry + textshdr->sh_size < cpu->mem_size);
+	if (ehdr->e_entry + textshdr->sh_size >= cpu->mem_size)
+		return -4;
+
 	memcpy(&(cpu->mem[ehdr->e_entry]), &binary[textshdr->sh_offset], textshdr->sh_size);
 	cpu->pc = ehdr->e_entry;
 	return 0;
