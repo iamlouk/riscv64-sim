@@ -6,10 +6,12 @@
   <style>
     html {
       font-family: monospace;
+      /* background-color: black; */
+      /* color: white; */
     }
   
     td {
-      border: 1px solid black;
+      border: 1px solid rgb(100, 100, 100);
     }
   </style>
 </head>
@@ -20,59 +22,64 @@
         ELF executable: <i id="current-executable">None selected...</i>
       </td>
       <td>
-        Examples: <button id="load-loop-elf"><code>loop.elf</code></button>
+        Examples:
+        <button id="load-loop-elf"><code>loop.elf</code></button>,
+        <button id="load-fibs-elf"><code>fibs.elf</code></button>
       </td>
       <td>
         <button id="start-stop">Start</button>
       </td>
       <td>
-        I=<span id="executed-instructions">/</span>
+        Speed (<span id="speed-span"></span>ms): <input type="range" min="10" max="1000" step="1" id="speed-slider"/>
       </td>
     </tr>
     <tr>
-      <td colspan="4">
+      <td colspan="3">
         Current Instruction: <code id="current-instruction">None</code>
       </td>
+      <td>
+        Executed Instructions: <span id="executed-instructions">/</span>
+      </td>
     </tr>
     <tr>
       <td colspan="4">
-        <table>
+        <table style="width: 100%;">
           <tr>
             <td>Register</td><td>Value</td>
           </tr>
           <tr><td>PC</td><td id="reg-pc"></td></tr>
-          <tr><td>0 (zero)</td><td id="reg-0"></td></tr>
-          <tr><td>1 (ra)</td><td id="reg-1"></td></tr>
-          <tr><td>2</td><td id="reg-2"></td></tr>
-          <tr><td>3</td><td id="reg-3"></td></tr>
-          <tr><td>4</td><td id="reg-4"></td></tr>
-          <tr><td>5 (t1)</td><td id="reg-5"></td></tr>
-          <tr><td>6 (t2)</td><td id="reg-6"></td></tr>
-          <tr><td>7 (t3)</td><td id="reg-7"></td></tr>
-          <tr><td>8</td><td id="reg-8"></td></tr>
-          <tr><td>9</td><td id="reg-9"></td></tr>
-          <tr><td>10</td><td id="reg-10"></td></tr>
-          <tr><td>11</td><td id="reg-11"></td></tr>
-          <tr><td>12</td><td id="reg-12"></td></tr>
-          <tr><td>13</td><td id="reg-13"></td></tr>
-          <tr><td>14</td><td id="reg-14"></td></tr>
-          <tr><td>15</td><td id="reg-15"></td></tr>
-          <tr><td>16</td><td id="reg-16"></td></tr>
-          <tr><td>17</td><td id="reg-17"></td></tr>
-          <tr><td>18</td><td id="reg-18"></td></tr>
-          <tr><td>19</td><td id="reg-19"></td></tr>
-          <tr><td>20</td><td id="reg-20"></td></tr>
-          <tr><td>21</td><td id="reg-21"></td></tr>
-          <tr><td>22</td><td id="reg-22"></td></tr>
-          <tr><td>23</td><td id="reg-23"></td></tr>
-          <tr><td>24</td><td id="reg-24"></td></tr>
-          <tr><td>25</td><td id="reg-25"></td></tr>
-          <tr><td>26</td><td id="reg-26"></td></tr>
-          <tr><td>27</td><td id="reg-27"></td></tr>
-          <tr><td>28</td><td id="reg-28"></td></tr>
-          <tr><td>29</td><td id="reg-29"></td></tr>
-          <tr><td>30</td><td id="reg-30"></td></tr>
-          <tr><td>31</td><td id="reg-31"></td></tr>
+          <tr><td>x0 (zero)</td><td id="reg-0"></td></tr>
+          <tr><td>x1 (ra)</td><td id="reg-1"></td></tr>
+          <tr><td>x2</td><td id="reg-2"></td></tr>
+          <tr><td>x3</td><td id="reg-3"></td></tr>
+          <tr><td>x4</td><td id="reg-4"></td></tr>
+          <tr><td>x5 (t1)</td><td id="reg-5"></td></tr>
+          <tr><td>x6 (t2)</td><td id="reg-6"></td></tr>
+          <tr><td>x7 (t3)</td><td id="reg-7"></td></tr>
+          <tr><td>x8</td><td id="reg-8"></td></tr>
+          <tr><td>x9</td><td id="reg-9"></td></tr>
+          <tr><td>x10</td><td id="reg-10"></td></tr>
+          <tr><td>x11</td><td id="reg-11"></td></tr>
+          <tr><td>x12</td><td id="reg-12"></td></tr>
+          <tr><td>x13</td><td id="reg-13"></td></tr>
+          <tr><td>x14</td><td id="reg-14"></td></tr>
+          <tr><td>x15</td><td id="reg-15"></td></tr>
+          <tr><td>x16</td><td id="reg-16"></td></tr>
+          <tr><td>x17</td><td id="reg-17"></td></tr>
+          <tr><td>x18</td><td id="reg-18"></td></tr>
+          <tr><td>x19</td><td id="reg-19"></td></tr>
+          <tr><td>x20</td><td id="reg-20"></td></tr>
+          <tr><td>x21</td><td id="reg-21"></td></tr>
+          <tr><td>x22</td><td id="reg-22"></td></tr>
+          <tr><td>x23</td><td id="reg-23"></td></tr>
+          <tr><td>x24</td><td id="reg-24"></td></tr>
+          <tr><td>x25</td><td id="reg-25"></td></tr>
+          <tr><td>x26</td><td id="reg-26"></td></tr>
+          <tr><td>x27</td><td id="reg-27"></td></tr>
+          <tr><td>x28</td><td id="reg-28"></td></tr>
+          <tr><td>x29</td><td id="reg-29"></td></tr>
+          <tr><td>x30</td><td id="reg-30"></td></tr>
+          <tr><td>x31</td><td id="reg-31"></td></tr>
         </table>
       </td>
     </tr>
@@ -83,6 +90,8 @@
     const executedInstructionsSpan = document.querySelector('#executed-instructions')
     const currentExecutableSpan = document.querySelector('#current-executable')
     const currentInstruction = document.querySelector('#current-instruction')
+    const speedSpan = document.querySelector('#speed-span')
+    const speedSlider = document.querySelector('#speed-slider')
     const pcRegTd = document.querySelector('#reg-pc')
     const gpRegTds = [];
     for (let i = 0; i < 32; i++)
@@ -92,11 +101,14 @@
     let wasmInstance = null;
     let loopId = null;
     let somethingLoaded = false;
+    let loopInterval = 250;
+    speedSlider.value = loopInterval.toString()
+    speedSpan.innerText = loopInterval.toString()
 
     function updateUI() {
       currentInstruction.innerText = getCurrentInstructionString()
       executedInstructionsSpan.innerText = executedInstructions.toString()
-      pcRegTd.innerText = wasmInstance.exports.riscv_sim_get_pc().toString()
+	    pcRegTd.innerText = `0x${wasmInstance.exports.riscv_sim_get_pc().toString(16)}`
       for (let i = 0; i < 32; i++)
         gpRegTds[i].innerText = wasmInstance.exports.riscv_sim_get_reg(i).toString()
     }
@@ -116,7 +128,7 @@
         return
 
       startStopBtn.innerText = 'Stop'
-      loopId = setInterval(loop, 500)
+      loopId = setInterval(loop, loopInterval)
     }
 
     function stop() {
@@ -173,13 +185,28 @@
       wasmInstance = instance;
 
       document.querySelector('#load-loop-elf').addEventListener('click', () =>
-        fetch('./examples/loop.elf').then(res => res.arrayBuffer()).then(buf => loadBinary('loop.elf', buf)))
+        fetch('./examples/loop.elf').then(res => res.arrayBuffer())
+            .then(buf => loadBinary('loop.elf', buf)))
+
+      document.querySelector('#load-fibs-elf').addEventListener('click', () =>
+        fetch('./examples/fibs.elf').then(res => res.arrayBuffer())
+            .then(buf => loadBinary('fibs.elf', buf)))
 
       startStopBtn.addEventListener('click', () => {
         if (loopId == null)
           start()
         else
           stop()
+      })
+
+      speedSlider.addEventListener('change', (event) => {
+        let value = Number.parseInt(event.target.value)
+        speedSpan.innerText = value.toString()
+        loopInterval = value
+        if (loopId != null) {
+          stop()
+          start()
+        }
       })
     }
 

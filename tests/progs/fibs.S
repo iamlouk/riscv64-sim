@@ -30,6 +30,14 @@ _start:
 	jal ra, fibs
 	mv x22, a0
 
+	li a0, 0x8
+	jal ra, fibs
+	mv x23, a0
+
+	li a0, 0x9
+	jal ra, fibs
+	mv x24, a0
+
 end:
 	jal zero, end
 
