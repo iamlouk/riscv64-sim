@@ -14,6 +14,7 @@ static inline int get_rd    (uint32_t raw) { return (raw >>  7) & 0b0011111; }
 static inline int get_rs1   (uint32_t raw) { return (raw >> 15) & 0b0011111; }
 static inline int get_rs2   (uint32_t raw) { return (raw >> 20) & 0b0011111; }
 static inline int get_funct3(uint32_t raw) { return (raw >> 12) & 0b0000111; }
+static inline int get_funct7(uint32_t raw) { return (raw >> 25) & 0b1111111; }
 
 struct decode_table_entry {
 	enum instruction_t funct3_table[(1 << 3)];
@@ -22,6 +23,14 @@ struct decode_table_entry {
 			struct instruction *inst, int32_t raw,
 			struct decode_table_entry *table_entry);
 };
+
+static void decode_r_type(struct instruction *inst, int32_t raw) {
+	inst->flags |= RISCV_FLAG_R_TYPE;
+	inst->op_count = 3;
+	inst->operands[0].reg = get_rd(raw);
+	inst->operands[1].reg = get_rs1(raw);
+	inst->operands[2].reg = get_rs2(raw);
+}
 
 static void decode_i_type(struct instruction *inst, int32_t raw) {
 	inst->flags |= RISCV_FLAG_I_TYPE;
@@ -92,6 +101,24 @@ static void decode_jalr(
 	inst->flags |= RISCV_FLAG_JUMP;
 }
 
+static void decode_r_01100(struct instruction *inst, int32_t raw,
+		struct decode_table_entry *table_entry) {
+	static const enum instruction_t alu_decode_table[(1 << 7)][(1 << 3)] = {
+		[0b0000000] = {
+			[0b000] = RISCV_ADD,
+			[0b001] = RISCV_SLL,
+			[0b010] = RISCV_SLT,
+			[0b011] = RISCV_SLTU,
+			[0b100] = RISCV_XOR,
+			[0b101] = RISCV_SRL,
+			[0b110] = RISCV_OR,
+			[0b111] = RISCV_AND
+		}
+	};
+
+	inst->id = alu_decode_table[get_funct7(raw)][get_funct3(raw)];
+}
+
 static struct decode_table_entry decode_table[] = {
 	[0b01101] = {
 		.decode_type = decode_u_type,
@@ -148,7 +175,12 @@ static struct decode_table_entry decode_table[] = {
 			// TODO: SLLI, SRLI, SRAI
 		},
 		.decode_type = decode_i_type
-	}
+	},
+	[0b01100] = {
+		.funct3_table = {},
+		.decode_type = decode_r_type,
+		.special_case = decode_r_01100
+	},
 };
 
 size_t riscv_decode_single(

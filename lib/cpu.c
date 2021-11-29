@@ -9,6 +9,12 @@ static void eval_jal(struct cpu *cpu, struct instruction *ins) {
 	cpu->pc += ins->operands[1].imm;
 }
 
+static void eval_jalr(struct cpu *cpu, struct instruction *ins) {
+	cpu->regs[ins->operands[0].reg] = cpu->pc + ins->size;
+	cpu->pc = cpu->regs[ins->operands[1].reg] + ins->operands[2].imm;
+	cpu->pc &= ~1;
+}
+
 static void eval_addi(struct cpu *cpu, struct instruction *ins) {
 	cpu->regs[ins->operands[0].reg] = cpu->regs[ins->operands[1].reg] + ins->operands[2].imm;
 }
@@ -22,6 +28,11 @@ static void eval_blt(struct cpu *cpu, struct instruction *ins) {
 		cpu->pc += ins->size;
 }
 
+static void eval_add(struct cpu *cpu, struct instruction *ins) {
+	cpu->regs[ins->operands[0].reg] =
+		cpu->regs[ins->operands[1].reg] + cpu->regs[ins->operands[2].reg];
+}
+
 struct instruction_table_entry {
 	const char *name;
 	void (*eval)(struct cpu *cpu, struct instruction *ins);
@@ -29,8 +40,10 @@ struct instruction_table_entry {
 
 static const struct instruction_table_entry instructions[] = {
 	[RISCV_JAL]  = { .name = "jal",  .eval = eval_jal  },
+	[RISCV_JALR] = { .name = "jalr", .eval = eval_jalr },
 	[RISCV_BLT]  = { .name = "blt",  .eval = eval_blt  },
 	[RISCV_ADDI] = { .name = "addi", .eval = eval_addi },
+	[RISCV_ADD]  = { .name = "add",  .eval = eval_add  }
 };
 
 int cpu_current_instruction(struct cpu *cpu, struct instruction *ins) {
@@ -60,22 +73,13 @@ int instruction_as_string(char *buf, struct instruction *ins) {
 	}
 
 	const char *name = instructions[ins->id].name;
-	if (ins->flags & RISCV_FLAG_R_TYPE)
+	if ((ins->flags & RISCV_FLAG_R_TYPE) != 0)
 		return sprintf(buf, "%s %lu, %lu, %lu", name, ins->operands[0].reg,
 				ins->operands[1].reg, ins->operands[2].reg);
-	if (ins->flags & RISCV_FLAG_I_TYPE)
+	if ((ins->flags & (RISCV_FLAG_I_TYPE | RISCV_FLAG_S_TYPE | RISCV_FLAG_B_TYPE)) != 0)
 		return sprintf(buf, "%s %lu, %lu, %lx", name, ins->operands[0].reg,
 				ins->operands[1].reg, ins->operands[2].imm);
-	if (ins->flags & RISCV_FLAG_S_TYPE)
-		return sprintf(buf, "%s %lu, %lu, %lx", name, ins->operands[0].reg,
-				ins->operands[1].reg, ins->operands[2].imm);
-	if (ins->flags & RISCV_FLAG_B_TYPE)
-		return sprintf(buf, "%s %lu, %lu, %lx", name, ins->operands[0].reg,
-				ins->operands[1].reg, ins->operands[2].imm);
-	if (ins->flags & RISCV_FLAG_U_TYPE)
-		return sprintf(buf, "%s %lu, %lx", name,
-				ins->operands[0].reg, ins->operands[1].imm);
-	if (ins->flags & RISCV_FLAG_J_TYPE)
+	if ((ins->flags & (RISCV_FLAG_U_TYPE | RISCV_FLAG_J_TYPE)) != 0)
 		return sprintf(buf, "%s %lu, %lx", name,
 				ins->operands[0].reg, ins->operands[1].imm);
 
