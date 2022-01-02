@@ -40,6 +40,12 @@ static const char *file_as_string(const char *filename) {
 	return buf;
 }
 
+static void uart_out(uint8_t byte, uint64_t addr) {
+	(void) addr;
+	// fprintf(stdout, "CHAR: '%c' (AT: %lu)\n", byte, addr);
+	fprintf(stdout, "%c", byte);
+}
+
 int main(int argc, char *argv[]) {
 	if (argc != 2)
 		fatal("usage: %s <file.elf>\n", argv[0]);
@@ -48,6 +54,7 @@ int main(int argc, char *argv[]) {
 	struct cpu cpu = { 0 };
 	cpu.mem_size = (1 << 20);
 	cpu.mem = calloc(cpu.mem_size, 1);
+	cpu.uart_out = uart_out;
 	if (!cpu.mem)
 		die("calloc");
 
@@ -55,7 +62,7 @@ int main(int argc, char *argv[]) {
 		fatal("loading binary failed\n");
 
 	for (;;) {
-		fprintf(stdout, "PC:%06lx\tt0=%08lx, t1=%08lx, t2=%08lx\n",
+		fprintf(stderr, "PC:%06lx\tt0=%08lx, t1=%08lx, t2=%08lx\n",
 			cpu.pc, cpu.regs[5], cpu.regs[6], cpu.regs[7]);
 
 		struct instruction ins;
@@ -64,7 +71,7 @@ int main(int argc, char *argv[]) {
 
 		char buf[124];
 		instruction_as_string(buf, &ins);
-		fprintf(stdout, "\t%s\n", buf);
+		fprintf(stderr, "\t%s\n", buf);
 
 		int64_t prev_pc = cpu.pc;
 		if (cpu_run_instruction(&cpu, &ins) != 0)

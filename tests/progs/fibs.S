@@ -2,6 +2,8 @@
 	.global _start
 	.type _start, @function
 _start:
+	nop
+
 	li a0, 0x1
 	jal ra, fibs
 	mv x16, a0

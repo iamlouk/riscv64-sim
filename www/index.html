@@ -24,13 +24,14 @@
       <td>
         Examples:
         <button id="load-loop-elf"><code>loop.elf</code></button>,
-        <button id="load-fibs-elf"><code>fibs.elf</code></button>
+        <button id="load-fibs-elf"><code>fibs.elf</code></button>,
+        <button id="load-hello-elf"><code>hello.elf</code></button>
       </td>
       <td>
         <button id="start-stop">Start</button>
       </td>
       <td>
-        Speed (<span id="speed-span"></span>ms): <input type="range" min="10" max="1000" step="1" id="speed-slider"/>
+        Delay (<span id="delay-span"></span>ms): <input type="range" min="0" max="2500" step="1" id="delay-slider"/>
       </td>
     </tr>
     <tr>
@@ -53,9 +54,9 @@
           <tr><td>x2</td><td id="reg-2"></td></tr>
           <tr><td>x3</td><td id="reg-3"></td></tr>
           <tr><td>x4</td><td id="reg-4"></td></tr>
-          <tr><td>x5 (t1)</td><td id="reg-5"></td></tr>
-          <tr><td>x6 (t2)</td><td id="reg-6"></td></tr>
-          <tr><td>x7 (t3)</td><td id="reg-7"></td></tr>
+          <tr><td>x5 (t0)</td><td id="reg-5"></td></tr>
+          <tr><td>x6 (t1)</td><td id="reg-6"></td></tr>
+          <tr><td>x7 (t2)</td><td id="reg-7"></td></tr>
           <tr><td>x8</td><td id="reg-8"></td></tr>
           <tr><td>x9</td><td id="reg-9"></td></tr>
           <tr><td>x10</td><td id="reg-10"></td></tr>
@@ -83,6 +84,11 @@
         </table>
       </td>
     </tr>
+    <tr>
+      <td colspan="4">
+        <textarea id="uart-out" style="width: 100%; height: 100%;" readonly></textarea>
+      </td>
+    </tr>
   </table>
 
   <script type="module">
@@ -90,8 +96,9 @@
     const executedInstructionsSpan = document.querySelector('#executed-instructions')
     const currentExecutableSpan = document.querySelector('#current-executable')
     const currentInstruction = document.querySelector('#current-instruction')
-    const speedSpan = document.querySelector('#speed-span')
-    const speedSlider = document.querySelector('#speed-slider')
+    const delaySpan = document.querySelector('#delay-span')
+    const delaySlider = document.querySelector('#delay-slider')
+    const uartOutput = document.querySelector('#uart-out')
     const pcRegTd = document.querySelector('#reg-pc')
     const gpRegTds = [];
     for (let i = 0; i < 32; i++)
@@ -101,9 +108,10 @@
     let wasmInstance = null;
     let loopId = null;
     let somethingLoaded = false;
-    let loopInterval = 250;
-    speedSlider.value = loopInterval.toString()
-    speedSpan.innerText = loopInterval.toString()
+    let loopInterval = 500;
+    delaySlider.value = loopInterval.toString()
+    delaySpan.innerText = loopInterval.toString()
+    uartOutput.value = ''
 
     function updateUI() {
       currentInstruction.innerText = getCurrentInstructionString()
@@ -160,6 +168,7 @@
 
     async function loadBinary(name, binary) {
       currentExecutableSpan.innerText = name
+      uartOutput.value = ''
       executedInstructions = 0
 
       const cBufferPtr = wasmInstance.exports.riscv_sim_get_buffer(binary.byteLength)
@@ -181,8 +190,22 @@
     }
 
     async function init() {
-      const { instance } = await WebAssembly.instantiateStreaming(fetch('./libriscvsim.wasm'))
-      wasmInstance = instance;
+      try {
+        const { instance } = await WebAssembly.instantiateStreaming(
+          fetch('./libriscvsim.wasm'),
+          {
+            env: {
+              riscv_sim_import_uart_out: (byte, addr) => {
+                // console.log(`A char: ${String.fromCharCode(byte)} (from: ${addr})`)
+                uartOutput.value += String.fromCharCode(byte)
+              }
+            }
+          })
+        wasmInstance = instance;
+      } catch (error) {
+        console.error(error)
+        return
+      }
 
       document.querySelector('#load-loop-elf').addEventListener('click', () =>
         fetch('./examples/loop.elf').then(res => res.arrayBuffer())
@@ -192,6 +215,10 @@
         fetch('./examples/fibs.elf').then(res => res.arrayBuffer())
             .then(buf => loadBinary('fibs.elf', buf)))
 
+      document.querySelector('#load-hello-elf').addEventListener('click', () =>
+        fetch('./examples/hello.elf').then(res => res.arrayBuffer())
+            .then(buf => loadBinary('hello.elf', buf)))
+
       startStopBtn.addEventListener('click', () => {
         if (loopId == null)
           start()
@@ -199,9 +226,9 @@
           stop()
       })
 
-      speedSlider.addEventListener('change', (event) => {
+      delaySlider.addEventListener('change', (event) => {
         let value = Number.parseInt(event.target.value)
-        speedSpan.innerText = value.toString()
+        delaySpan.innerText = value.toString()
         loopInterval = value
         if (loopId != null) {
           stop()

@@ -5,12 +5,14 @@
 #include "cpu.h"
 #include "loader.h"
 
+extern void riscv_sim_import_uart_out(uint8_t b, uint64_t addr);
 
 #define MEM_SIZE (1 << 20)
 static char cpu_memory[MEM_SIZE];
 static struct cpu cpu = {
 	.mem_size = MEM_SIZE,
-	.mem = (uint8_t*) cpu_memory
+	.mem = (uint8_t*) cpu_memory,
+	.uart_out = &riscv_sim_import_uart_out
 };
 
 int riscv_sim_load_elf(const unsigned char *binary) {

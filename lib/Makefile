@@ -1,7 +1,7 @@
 CC = clang
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -std=c11 -g -nostdlib
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -std=c11 -nostdlib -Og -g -fsanitize=address -fsanitize=undefined
 WASM_CFLAGS = -Wall -Wextra -O3 -Wno-unused-parameter -Wno-format --target=wasm32-unkown-unkown -nostdlib
-WASM_LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--lto-O2
+WASM_LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--strip-all -Wl,-allow-undefined-file,imports.syms -Wl,--lto-O2 -Wl,--export-dynamic
 
 .PHONY: all clean
 
