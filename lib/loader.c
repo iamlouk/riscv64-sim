@@ -47,6 +47,8 @@ int load_binary(struct cpu *cpu, const char *binary) {
 	if (ehdr->e_entry + textshdr->sh_size >= cpu->mem_size)
 		return -4;
 
+	memset(cpu->regs, 0x0, sizeof(cpu->regs));
+	memset(cpu->mem, 0x0, cpu->mem_size);
 	memcpy(&(cpu->mem[ehdr->e_entry]), &binary[textshdr->sh_offset], textshdr->sh_size);
 	cpu->pc = ehdr->e_entry;
 	return 0;

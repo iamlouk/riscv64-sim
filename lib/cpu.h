@@ -6,10 +6,10 @@
 #include "decode.h"
 
 struct cpu {
-	int64_t pc;
+	int64_t  pc;
 	uint64_t regs[32];
-	size_t mem_size;
-	char *mem;
+	size_t   mem_size;
+	uint8_t  *mem;
 };
 
 int cpu_current_instruction(struct cpu *cpu, struct instruction *ins);

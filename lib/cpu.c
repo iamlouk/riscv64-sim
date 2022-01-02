@@ -33,6 +33,14 @@ static void eval_add(struct cpu *cpu, struct instruction *ins) {
 		cpu->regs[ins->operands[1].reg] + cpu->regs[ins->operands[2].reg];
 }
 
+static void eval_sb(struct cpu *cpu, struct instruction *ins) {
+	cpu->mem[cpu->regs[ins->operands[0].reg]] = cpu->regs[ins->operands[1].reg];
+}
+
+static void eval_lb(struct cpu *cpu, struct instruction *ins) {
+	cpu->regs[ins->operands[0].reg] = (uint8_t) cpu->mem[ins->operands[1].reg + ins->operands[2].imm];
+}
+
 struct instruction_table_entry {
 	const char *name;
 	void (*eval)(struct cpu *cpu, struct instruction *ins);
@@ -43,7 +51,10 @@ static const struct instruction_table_entry instructions[] = {
 	[RISCV_JALR] = { .name = "jalr", .eval = eval_jalr },
 	[RISCV_BLT]  = { .name = "blt",  .eval = eval_blt  },
 	[RISCV_ADDI] = { .name = "addi", .eval = eval_addi },
-	[RISCV_ADD]  = { .name = "add",  .eval = eval_add  }
+	[RISCV_ADD]  = { .name = "add",  .eval = eval_add  },
+
+	[RISCV_LB]   = { .name = "lb",   .eval = eval_lb   },
+	[RISCV_SB]   = { .name = "sb",   .eval = eval_sb   },
 };
 
 int cpu_current_instruction(struct cpu *cpu, struct instruction *ins) {

@@ -95,6 +95,6 @@ struct instruction {
 
 size_t riscv_decode_single(
 	struct instruction *ins,
-	const char *data,
+	const uint8_t *data,
 	int64_t off);
 

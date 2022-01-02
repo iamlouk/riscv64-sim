@@ -185,7 +185,7 @@ static struct decode_table_entry decode_table[] = {
 
 size_t riscv_decode_single(
 		struct instruction *ins,
-		const char *data,
+		const uint8_t *data,
 		int64_t off) {
 	memset(ins, 0, sizeof(struct instruction));
 	ins->address = off;

@@ -10,7 +10,7 @@
 static char cpu_memory[MEM_SIZE];
 static struct cpu cpu = {
 	.mem_size = MEM_SIZE,
-	.mem = cpu_memory
+	.mem = (uint8_t*) cpu_memory
 };
 
 int riscv_sim_load_elf(const unsigned char *binary) {
