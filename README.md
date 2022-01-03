@@ -1,26 +1,21 @@
 # RISC-V Simulator
 
-__*work in progress...*__ 
+This project is deployed [here](https://louknr.net/projs/riscv64-sim/www/index.html) (That version is probably not up-to-date though). Everything is still very much __*work in progress...*__! The examples in `tests/progs` all work, you can build them by running `make all` in that directory. The root Makefile will build a CLI application and the `libriscvsim.wasm` used by the web-frontend.
 
-The examples in `tests/progs` all work. Build the examples by running `make <example-name>.elf` in that directory. The command line application can be
-build by calling the root `Makefile`. Call `make libriscvsim.wasm` in `lib/` to build the WebAssembly library.
+Dependencies/Requirements: *riscv64-elf-gcc* for building the examples and LLVM/clang with a backend and linker for *wasm32-unkown-unkown* for building the wasm lib. Go look at the Makefile in `lib/` if you want to build using another WASM target.
 
-Requirements: *riscv64-elf-gcc* and LLVM/clang with a backend that is able to target *wasm32-unkown-unkown*. Makefiles can be changed if different compilers are used.
-
-## Goals
-
-- Have a *zero-dependencies* core in C which can be extended and used as a library
-    - Library takes in an ELF executable and loads it into the virt. memory and then executes it
-    - Provide callbacks/configuration for mapped memory regions such as URAT
-    - Virt. extensible CPU that can execute RISC-V instructions directly (Extend to JIT and/or binary translation later)
-- Make core compileable to WASM, build a frontend for the Web
-    - Small glue C code (callbacks), provide API to JS
-    - UI for uploading ELF file, starting execution, UART in/output
-- Make CLI wrapper
-    - Pass it the executable, it gets executed, done
-
-- Inspiration:
-    - [c-to-webassembly](https://surma.dev/things/c-to-webassembly/)
-    - [wasi](https://depth-first.com/articles/2019/10/16/compiling-c-to-webassembly-and-running-it-without-emscripten/)
-    - [RISC-V spec](https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf) (Opcodes: Chap. 19)
+- Features
+  - `libriscvsim.wasm` has no external dependencies at all (Not even *libc*)
+  - Usable via a CLI on x86/ARM/... and in a browser using [WebAssembly](https://developer.mozilla.org/en-US/docs/WebAssembly)
+- TODOs
+  - Be able to decode a lot more instructions
+  - Be able to evaluate a lot more instructions
+  - Proper UART
+  - Make the loader be able to load data and bss sections
+  - Step mode for Web-UI
+  - Fix bugs (known bugs: `lui` does not work in WASM?)
+- Inspiration
+  - [c-to-webassembly](https://surma.dev/things/c-to-webassembly/)
+  - [wasi](https://depth-first.com/articles/2019/10/16/compiling-c-to-webassembly-and-running-it-without-emscripten/)
+  - [RISC-V spec](https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf) (Opcodes: Chap. 19)
 
