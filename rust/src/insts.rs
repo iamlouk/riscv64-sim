@@ -3,31 +3,39 @@ use crate::cpu;
 pub type Reg = u8;
 pub const REG_ZR: Reg = 0;
 
-fn sign_extend(x: u32, sign_bit: usize) -> u64 {
-    let m = 1usize << (sign_bit - 1usize);
-    let x = (x as usize) & ((1usize << sign_bit) - 1usize);
-    (x ^ m).wrapping_sub(m) as u64
+fn sign_extend(x: u32, sign_bit: u32) -> u32 {
+    let m = 1u32 << (sign_bit - 1u32);
+    let x = x & ((1u32 << sign_bit) - 1u32);
+    (x ^ m).wrapping_sub(m)
 }
 
+#[derive(Debug, Clone)]
 pub enum Predicate { EQ, NE, LT, LTU, GE, GEU }
 
+#[derive(Debug, Clone)]
 pub enum CSR { RW, RS, RC, RWI, RSI, RCI }
 
+#[derive(Debug, Clone)]
 pub enum ALU {
-    Add, Sub, SLT, SLTU, And, Or, XOr, SLL, SRL, SRA,
-    Mul, Div, DivU, Rem, RemU
+    Add, AddW, Sub, SubW, And, Or, XOr,
+    SLT, SLTU,
+    SLL, SLLW, SRL, SRLW, SRA, SRAW,
+    Mul, MulW,
+    Div, DivW, DivU, DivUW,
+    Rem, RemW, RemU, RemUW
 }
 
+#[derive(Debug, Clone)]
 pub enum Inst {
-    Load { dst: Reg, width: u8, base: Reg, offset: i64 },
-    Store { src: Reg, width: u8, base: Reg, offset: i64 },
-    JumpAndLink { dst: Reg, offset: i64 },
-    JumpAndLinkReg { dst: Reg, base: Reg, offset: i64 },
-    Branch { pred: Predicate, src1: Reg, src2: Reg, offset: i64 },
+    Load { dst: Reg, width: u8, base: Reg, offset: i32 },
+    Store { src: Reg, width: u8, base: Reg, offset: i32 },
+    JumpAndLink { dst: Reg, offset: i32 },
+    JumpAndLinkReg { dst: Reg, base: Reg, offset: i32 },
+    Branch { pred: Predicate, src1: Reg, src2: Reg, offset: i32 },
     CtrlStatusReg { op: CSR, dst: Reg, src: Reg, csr: u16 },
     ECall { _priv: u8 },
     EBreak { _priv: u8 },
-    ALUImm { op: ALU, dst: Reg, src1: Reg, imm: u64 },
+    ALUImm { op: ALU, dst: Reg, src1: Reg, imm: u32 },
     ALUReg { op: ALU, dst: Reg, src1: Reg, src2: Reg },
     LoadUpperImmediate { dst: Reg, imm: u32 },
     AddUpperImmediateToPC { dst: Reg, imm: u32 }
@@ -40,29 +48,63 @@ pub enum Error {
     Unimplemented(&'static str),
 }
 
+// The C extension really contains some fucked-up encodings:
 pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
-    fn get_reg3_bit4(raw: u16) -> Reg { (((raw >> 7) & 0b111) + 8) as Reg }
-    fn get_reg3_bit9(raw: u16) -> Reg { (((raw >> 2) & 0b111) + 8) as Reg }
-    fn get_bit12(raw: u16) -> u16 { (raw & 0b0001000000000000) >> 12 }
+    fn get_reg3_bits987(raw: u16) -> Reg { (((raw >> 7) & 0b111) + 8) as Reg }
+    fn get_reg3_bits432(raw: u16) -> Reg { (((raw >> 2) & 0b111) + 8) as Reg }
 
-    fn get_reg5_rs1(raw: u16) -> Reg { ((raw >> 7) & 0x1f) as Reg }
-    fn get_reg5_rs2(raw: u16) -> Reg { ((raw >> 2) & 0x1f) as Reg }
+    fn get_reg5_bits1110987(raw: u16) -> Reg { ((raw >> 7) & 0b11111) as Reg }
+
+    fn get_uimm_53_26(raw: u16) -> u16 {
+        ((raw & 0b0000000000100000) << ( 6 - 5)) |
+        ((raw & 0b0000000001000000) >> ( 6 - 2)) |
+        ((raw & 0b0001110000000000) >> (10 - 3))
+    }
+
+    fn get_uimm_53_76(raw: u16) -> u16 {
+        ((raw & 0b0000000001100000) << ( 6 - 5)) |
+        ((raw & 0b0001110000000000) >> (10 - 3))
+    }
+
+    fn get_nzimm_bits1265432(raw: u16) -> u32 {
+        sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
+                     ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 5)
+    }
 
     Ok(match ((raw >> 13) & 0b111, raw & 0b11) {
-        (0b100, 0b10) => match (get_bit12(raw), get_reg5_rs1(raw), get_reg5_rs2(raw)) {
-            (0, base, 0) if base != 0 =>
-                Inst::JumpAndLinkReg { dst: REG_ZR, base, offset: 0x0 },
-            (0, dst, src1) if dst != 0 && src1 != 0 =>
-                Inst::ALUReg { op: ALU::Add, dst, src1, src2: REG_ZR },
-            (0, 0, 0) => Inst::EBreak { _priv: 0 },
-            (1, base, 0) if base != 0 =>
-                Inst::JumpAndLinkReg { dst: 1, base, offset: 1 },
-            (1, dst, src) if dst != 0 && src != 0 =>
-                Inst::ALUReg { op: ALU::Add, dst, src1: dst, src2: src },
-            (_, _, _) => unimplemented!()
-        },
         (0b000, 0b00) if raw == 0 => return Err(Error::Illegal),
-        (0b100, 0b00) => return Err(Error::InvalidEncoding("reserved compressed instruction")),
+        (0b000, 0b00) => Inst::ALUImm {
+            op: ALU::Add, dst: get_reg3_bits432(raw), src1: 2,
+            imm: (((raw & 0b000000100000) >> (5 - 3)) |
+                  ((raw & 0b000001000000) >> (6 - 2)) |
+                  ((raw & 0b000110000000) >> (7 - 6)) |
+                  ((raw & 0b011000000000) >> (8 - 4))) as u32
+        },
+        (0b001, 0b00) => unimplemented!("C.FLD"),
+        (0b010, 0b00) => Inst::Load {
+            dst: get_reg3_bits432(raw), width: 4, base: get_reg3_bits987(raw),
+            offset: get_uimm_53_26(raw) as i32
+        },
+        (0b011, 0b00) => Inst::Load {
+            dst: get_reg3_bits432(raw), width: 8, base: get_reg3_bits987(raw),
+            offset: get_uimm_53_76(raw) as i32
+        },
+        (0b100, 0b00) => return Err(Error::InvalidEncoding("C extension reserved space")),
+        (0b101, 0b00) => unimplemented!("C.FSD"),
+        (0b110, 0b00) => Inst::Store {
+            src: get_reg3_bits432(raw), width: 4, base: get_reg3_bits987(raw),
+            offset: get_uimm_53_26(raw) as i32
+        },
+        (0b111, 0b00) => Inst::Store {
+            src: get_reg3_bits432(raw), width: 8, base: get_reg3_bits987(raw),
+            offset: get_uimm_53_76(raw) as i32
+        },
+        (0b000, 0b01) => Inst::ALUImm {
+            op: ALU::Add,
+            dst: get_reg5_bits1110987(raw),
+            src1: get_reg5_bits1110987(raw),
+            imm: get_nzimm_bits1265432(raw)
+        },
         _ => unimplemented!()
     })
 }
@@ -93,12 +135,12 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 ((raw & 0x80000000) >> (31 - 20)) |
                 ((raw & 0x7fe00000) >> (21 -  1)) |
                 ((raw & 0x00100000) >> (20 - 11)) |
-                ((raw & 0x000ff000) >> (12 - 12)), 20) as i64
+                ((raw & 0x000ff000) >> (12 - 12)), 20) as i32
         },
         0b1100111 if get_funct3(raw) == 0 => Inst::JumpAndLinkReg {
             dst: get_rd(raw),
             base: get_rs1(raw),
-            offset: sign_extend((raw & 0xfff00000) >> 20, 12) as i64
+            offset: sign_extend((raw & 0xfff00000) >> 20, 12) as i32
         },
         0b1100011 => Inst::Branch {
             pred: match get_funct3(raw) {
@@ -116,7 +158,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 ((raw & 0x80000000) >> (31 - 12)) |
                 ((raw & 0x7e000000) >> (25 -  5)) |
                 ((raw & 0x00000f00) >> ( 8 -  1)) |
-                ((raw & 0x00000080) << 4), 12) as i64
+                ((raw & 0x00000080) << 4), 12) as i32
         },
         0b0000011 => Inst::Load {
             dst: get_rd(raw),
@@ -128,7 +170,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 _ => return Err(Error::Unimplemented("sign-extending loads"))
             },
             base: get_rs1(raw),
-            offset: sign_extend((raw & 0xfff00000) >> 20, 12) as i64
+            offset: sign_extend((raw & 0xfff00000) >> 20, 12) as i32
         },
         0b0100011 => Inst::Store {
             src: get_rs2(raw),
@@ -142,7 +184,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
             base: get_rs1(raw),
             offset: sign_extend(
                 ((raw & 0xfe000000) >> (25 - 5)) |
-                ((raw & 0x00000f80) >> ( 7 - 0)), 12) as i64
+                ((raw & 0x00000f80) >> ( 7 - 0)), 12) as i32
         },
         0b0010011 => {
             let dst = get_rd(raw);
@@ -155,12 +197,12 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 0b100 => Inst::ALUImm { op: ALU::XOr,  dst, src1, imm: imm12 },
                 0b110 => Inst::ALUImm { op: ALU::Or,   dst, src1, imm: imm12 },
                 0b111 => Inst::ALUImm { op: ALU::And,  dst, src1, imm: imm12 },
-                0b001 if get_funct7(raw) == 0 => Inst::ALUImm {
-                    op: ALU::SLL, dst, src1, imm: get_rs2(raw) as u64 },
-                0b101 if get_funct7(raw) == 0 => Inst::ALUImm {
-                    op: ALU::SRL, dst, src1, imm: get_rs2(raw) as u64 },
-                0b101 if get_funct7(raw) == 0b0100000 => Inst::ALUImm {
-                    op: ALU::SRL, dst, src1, imm: get_rs2(raw) as u64 },
+                0b001 if (get_funct7(raw) & !1) == 0 => Inst::ALUImm {
+                    op: ALU::SLL, dst, src1, imm: (raw >> 20) & 0x3f },
+                0b101 if (get_funct7(raw) & !1) == 0 => Inst::ALUImm {
+                    op: ALU::SRL, dst, src1, imm: (raw >> 20) & 0x3f },
+                0b101 if (get_funct7(raw) & !1) == 0b0100000 => Inst::ALUImm {
+                    op: ALU::SRL, dst, src1, imm: (raw >> 20) & 0x3f },
                 _ => return Err(Error::Unimplemented("shifts"))
             }
         },
@@ -203,12 +245,78 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 _ => return Err(Error::InvalidEncoding("system instruction"))
             }
         },
+        0b0011011 => match (get_funct7(raw), get_funct3(raw)) {
+            (_, 0b000) => Inst::ALUImm {
+                op: ALU::AddW,
+                dst: get_rd(raw), src1: get_rs1(raw),
+                imm: sign_extend((raw >> 20) & 0x1ff, 11)
+            },
+            (0b0000000, 0b001) => Inst::ALUImm {
+                op: ALU::SLLW,
+                dst: get_rd(raw), src1: get_rs1(raw),
+                imm: get_rs2(raw) as u32
+            },
+            (0b0000000, 0b101) => Inst::ALUImm {
+                op: ALU::SRLW,
+                dst: get_rd(raw), src1: get_rs1(raw),
+                imm: get_rs2(raw) as u32
+            },
+            (0b0100000, 0b101) => Inst::ALUImm {
+                op: ALU::SRAW,
+                dst: get_rd(raw), src1: get_rs1(raw),
+                imm: get_rs2(raw) as u32
+            },
+            _ => unimplemented!()
+        },
+        0b0111011 => match (get_funct7(raw), get_funct3(raw)) {
+            (0b0000000, 0b000) => Inst::ALUReg {
+                op: ALU::AddW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0100000, 0b000) => Inst::ALUReg {
+                op: ALU::SubW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0000000, 0b001) => Inst::ALUReg {
+                op: ALU::SLLW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0000000, 0b101) => Inst::ALUReg {
+                op: ALU::SRLW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0100000, 0b101) => Inst::ALUReg {
+                op: ALU::SRAW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0000001, 0b000) => Inst::ALUReg {
+                op: ALU::MulW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0000001, 0b100) => Inst::ALUReg {
+                op: ALU::DivW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0000001, 0b101) => Inst::ALUReg {
+                op: ALU::DivUW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0000001, 0b110) => Inst::ALUReg {
+                op: ALU::RemW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            (0b0000001, 0b111) => Inst::ALUReg {
+                op: ALU::RemUW,
+                dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
+            },
+            _ => unimplemented!()
+        },
         _ => return Err(Error::InvalidEncoding("unknown opcode"))
     }, 4))
 }
 
 pub fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
-    match inst {
+    match inst.clone() {
         Inst::LoadUpperImmediate { dst, imm } => {
             cpu.set_reg(dst, imm as u64);
         },
@@ -217,12 +325,12 @@ pub fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
         },
         Inst::JumpAndLink { dst, offset } => {
             cpu.set_reg(dst, (cpu.pc + inst_size) as u64);
-            cpu.pc += offset;
+            cpu.pc += offset as i64;
             return
         },
         Inst::JumpAndLinkReg { dst, base, offset } => {
             cpu.set_reg(dst, (cpu.pc + inst_size) as u64);
-            cpu.pc = (cpu.get_reg(base) as i64) + offset;
+            cpu.pc = (cpu.get_reg(base) as i64) + offset as i64;
             cpu.pc &= !1;
             return
         },
@@ -238,12 +346,12 @@ pub fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
                 Predicate::GEU => a >= b,
             };
             if branch {
-                cpu.pc += offset;
+                cpu.pc += offset as i64;
                 return
             }
         },
         Inst::Load { dst, width, base, offset } => {
-            let addr = ((cpu.get_reg(base) as i64) + offset) as usize;
+            let addr = ((cpu.get_reg(base) as i64) + offset as i64) as usize;
             cpu.set_reg(dst, match width {
                 1 => cpu.memory.load_u8(addr) as u64,
                 2 => cpu.memory.load_u16(addr) as u64,
@@ -253,7 +361,7 @@ pub fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
             });
         },
         Inst::Store { src, width, base, offset } => {
-            let addr = ((cpu.get_reg(base) as i64) + offset) as usize;
+            let addr = ((cpu.get_reg(base) as i64) + offset as i64) as usize;
             let val = cpu.get_reg(src);
             match width {
                 1 => cpu.memory.store_u8(addr, val as u8),
@@ -264,19 +372,30 @@ pub fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
             }
         },
         Inst::ALUImm { op, dst, src1, imm } => {
-            let val = cpu.get_reg(src1);
+            let uimm = imm as u64;
+            let simm = imm as i64;
+            let uval = cpu.get_reg(src1);
+            let sval = uval as i64;
             cpu.set_reg(dst, match op {
-                ALU::Add => val.wrapping_add(imm),
-                ALU::Sub => val.wrapping_sub(imm),
-                ALU::And => val & imm,
-                ALU::Or => val | imm,
-                ALU::XOr => val ^ imm,
-                ALU::SLL => val << imm,
-                ALU::SRL => val >> imm,
-                ALU::SRA => ((val as i64) >> (imm as i64)) as u64,
-                ALU::SLT => if (val as i64) < (imm as i64) { 1 } else { 0 },
-                ALU::SLTU => if val < imm { 1 } else { 0 },
-                _ => unimplemented!()
+                ALU::Add => uval.wrapping_add(uimm),
+                ALU::AddW => (uval as u32).wrapping_add(uimm as u32) as u64,
+                ALU::Sub => uval.wrapping_sub(uimm),
+                ALU::SubW => (uval as u32).wrapping_sub(uimm as u32) as u64,
+                ALU::And => uval & uimm,
+                ALU::Or => uval | uimm,
+                ALU::XOr => uval ^ uimm,
+                ALU::SLL => uval << uimm,
+                ALU::SLLW => ((uval as u32) << (uimm as u32)) as u64,
+                ALU::SRL => uval >> uimm,
+                ALU::SRLW => ((uval as u32) >> (uimm as u32)) as u64,
+                ALU::SRA => (sval >> simm) as u64,
+                ALU::SRAW => ((sval as i32) >> (simm as i32)) as u64,
+                ALU::SLT => if sval < simm { 1 } else { 0 },
+                ALU::SLTU => if uval < uimm { 1 } else { 0 },
+                ALU::Mul | ALU::MulW |
+                ALU::Div | ALU::DivW | ALU::DivU | ALU::DivUW |
+                ALU::Rem | ALU::RemW | ALU::RemU | ALU::RemUW
+                  => panic!("there is no valid encoding for this"),
             });
         },
         Inst::ALUReg { op, dst, src1, src2 } => {
@@ -284,20 +403,30 @@ pub fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
             let b = cpu.get_reg(src2);
             cpu.set_reg(dst, match op {
                 ALU::Add => a.wrapping_add(b),
+                ALU::AddW => (a as u32).wrapping_add(b as u32) as u64,
                 ALU::Sub => a.wrapping_sub(b),
+                ALU::SubW => (a as u32).wrapping_sub(b as u32) as u64,
                 ALU::And => a & b,
                 ALU::Or => a | b,
                 ALU::XOr => a ^ b,
                 ALU::SLL => a << b,
+                ALU::SLLW => ((a as u32) << (b as u32)) as u64,
                 ALU::SRL => a >> b,
+                ALU::SRLW => ((a as u32) >> (b as u32)) as u64,
                 ALU::SRA => ((a as i64) >> (b as i64)) as u64,
+                ALU::SRAW => ((a as i32) >> (b as i32)) as u64,
                 ALU::SLT => if (a as i64) < (b as i64) { 1 } else { 0 },
                 ALU::SLTU => if a < b { 1 } else { 0 },
                 ALU::Mul => a.wrapping_mul(b),
+                ALU::MulW => ((a as u32).wrapping_mul(b as u32)) as u64,
                 ALU::Div => ((a as i64) / (b as i64)) as u64,
+                ALU::DivW => ((a as i32) / (b as i32)) as u64,
                 ALU::DivU => a / b,
+                ALU::DivUW => ((a as u32) / (b as u32)) as u64,
                 ALU::Rem => ((a as i64) % (b as i64)) as u64,
-                ALU::RemU => a % b
+                ALU::RemW => ((a as i32) % (b as i32)) as u64,
+                ALU::RemU => a % b,
+                ALU::RemUW => ((a as u32) % (b as u32)) as u64,
             });
         },
         Inst::ECall { _priv } => unsafe { cpu::ecall(cpu) },
