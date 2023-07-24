@@ -6,7 +6,7 @@ use std::io::Write;
 
 use elf;
 use clap::{self, Parser};
-use insts::parse_instruction;
+use insts::{Inst, parse_instruction};
 
 #[derive(clap::Parser)]
 #[command(author, version, about)]
@@ -62,7 +62,7 @@ fn execute(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
     }
 }
 
-fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
+fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) -> std::io::Result<()> {
     let textsectionhdr = match elf_file.section_header_by_name(".text") {
         Ok(Some(hdr)) => hdr,
         Ok(None) => {
@@ -89,7 +89,7 @@ fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Ve
 
     let mut stdout = std::io::stdout().lock();
     let mut offset: usize = 0;
-    while offset < textsectionhdr.sh_size as usize {
+    while offset + 2 < textsectionhdr.sh_size as usize {
         let addr = textsectionhdr.sh_addr as usize + offset;
         let raw =
             ((bytes[offset + 0] as u32) <<  0) |
@@ -98,25 +98,42 @@ fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Ve
             ((bytes[offset + 3] as u32) << 24);
         let (inst, size) = match parse_instruction(raw) {
             Ok(res) => res,
-            Err(e) => {
-                eprintln!("[simrv64i]: failed to parse instruction: {:?}", e);
-                eprintln!("            binary: {:032b} as address {:#x}", raw, addr);
+            Err(_) => {
+                // eprintln!("[simrv64i]: failed to parse instruction: {:?}", e);
+                // eprintln!("            binary: {:032b} as address {:#x}", raw, addr);
                 // std::process::exit(1);
 
                 if (bytes[offset] & 0b11) == 0b11 {
-                    offset += 4;
+                    (Inst::Unknown, 4)
                 } else {
-                    offset += 2;
+                    (Inst::Unknown, 2)
                 }
-                continue;
             }
         };
-        write!(&mut stdout, "{:08x}({})\t", addr, size).unwrap();
-        inst.print(&mut stdout, addr as i64).expect("print to stdout failed");
-        write!(&mut stdout, "\n").unwrap();
-        stdout.flush().expect("stdout flush failed");
+
+        if size == 2 {
+            let raw =
+                ((bytes[offset + 0] as u32) << 0) |
+                ((bytes[offset + 1] as u32) << 8);
+            write!(&mut stdout, "{:8x}:\t{:04x}        ", addr, raw)?;
+        } else if size == 4 {
+            let raw =
+                ((bytes[offset + 0] as u32) << 0) |
+                ((bytes[offset + 1] as u32) << 8) |
+                ((bytes[offset + 2] as u32) << 16) |
+                ((bytes[offset + 3] as u32) << 24);
+            write!(&mut stdout, "{:8x}:\t{:08x}    ", addr, raw)?;
+        } else {
+            panic!()
+        }
+
+        inst.print(&mut stdout, addr as i64)?;
+        write!(&mut stdout, "\n")?;
+        // stdout.flush().expect("stdout flush failed");
         offset += size;
     }
+
+    Ok(())
 }
 
 fn main() {
@@ -148,7 +165,7 @@ fn main() {
     }
 
     if args.dump {
-        dump_text_section(elf_file, &raw_file);
+        dump_text_section(elf_file, &raw_file).expect("I/O error");
         return;
     }
 

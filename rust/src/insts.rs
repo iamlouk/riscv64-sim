@@ -29,6 +29,7 @@ pub enum ALU {
 
 #[derive(Debug, Clone)]
 pub enum Inst {
+    Unknown,
     Load { dst: Reg, width: u8, base: Reg, offset: i32, signext: bool },
     Store { src: Reg, width: u8, base: Reg, offset: i32 },
     JumpAndLink { dst: Reg, offset: i32 },
@@ -66,7 +67,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                   ((raw & 0b0000011110000000) >> ( 7 - 6)) |
                   ((raw & 0b0001100000000000) >> (11 - 4))) as u32
         },
-        (0b001, 0b00) => unimplemented!("C.FLD"),
+        (0b001, 0b00) => return Err(Error::Unimplemented("C.FLD")),
         (0b010, 0b00) => Inst::Load {
             dst: get_reg3_bits432(raw), width: 4, base: get_reg3_bits987(raw),
             offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
@@ -81,7 +82,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
             signext: true
         },
         (0b100, 0b00) => return Err(Error::InvalidEncoding("C extension reserved space")),
-        (0b101, 0b00) => unimplemented!("C.FSD"),
+        (0b101, 0b00) => return Err(Error::Unimplemented("C.FSD")),
         (0b110, 0b00) => Inst::Store {
             src: get_reg3_bits432(raw), width: 4, base: get_reg3_bits987(raw),
             offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
@@ -134,8 +135,16 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
             }
         },
         (0b100, 0b01) => match ((raw >> 10) & 0b11, get_reg3_bits987(raw)) {
-            (0b00, _) => unimplemented!("WTF is this C.SRLI64 shit?"),
-            (0b01, _) => unimplemented!("WTF is this C.SRAI64 shit?"),
+            (0b00, rd) => Inst::ALUImm {
+                op: ALU::SRL, dst: rd, src1: rd,
+                imm: (((raw & 0b0001000000000000) >> (12 - 5)) |
+                      ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32
+            },
+            (0b01, rd) => Inst::ALUImm {
+                op: ALU::SRA, dst: rd, src1: rd,
+                imm: (((raw & 0b0001000000000000) >> (12 - 5)) |
+                      ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32
+            },
             (0b10, rd) => Inst::ALUImm {
                 op: ALU::And,
                 dst: rd, src1: rd,
@@ -169,19 +178,19 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                 },
                 _ => return Err(Error::InvalidEncoding("C extension reserved space"))
             },
-            _ => unimplemented!()
+            _ => panic!("impossible?")
         },
         (0b101, 0b01) => Inst::JumpAndLink {
             dst: REG_ZR,
-            offset: sign_extend(
-                (((raw & 0b0001000000000000) >> (12 - 11)) |
-                 ((raw & 0b0000100000000000) >> (11 -  4)) |
-                 ((raw & 0b0000011000000000) >> ( 9 -  8)) |
-                 ((raw & 0b0000000100000000) << (10 -  8)) |
-                 ((raw & 0b0000000010000000) >> ( 7 -  6)) |
-                 ((raw & 0b0000000001000000) << ( 7 -  6)) |
-                 ((raw & 0b0000000000111000) >> ( 3 -  1)) |
-                 ((raw & 0b0000000000000100) << ( 5 -  2))) as u32, 11) as i32
+            offset: sign_extend((
+                    ((raw & 0b0001000000000000) >> (12 - 11)) |
+                    ((raw & 0b0000100000000000) >> (11 -  4)) |
+                    ((raw & 0b0000011000000000) >> ( 9 -  8)) |
+                    ((raw & 0b0000000100000000) << (10 -  8)) |
+                    ((raw & 0b0000000010000000) >> ( 7 -  6)) |
+                    ((raw & 0b0000000001000000) << ( 7 -  6)) |
+                    ((raw & 0b0000000000111000) >> ( 3 -  1)) |
+                    ((raw & 0b0000000000000100) << ( 5 -  2))) as u32, 11) as i32
         },
         (0b110, 0b01) => Inst::Branch {
             pred: Predicate::EQ,
@@ -205,8 +214,13 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                  ((raw & 0b0000000000011000) >> ( 3 - 1)) |
                  ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 8) as i32
         },
-        (0b000, 0b10) => unimplemented!("WTF is this C.SLLI64 shit?"),
-        (0b001, 0b10) => unimplemented!("C.FLDSP"),
+        (0b000, 0b10) => Inst::ALUImm {
+            op: ALU::SLL,
+            dst: get_reg5_bits1110987(raw), src1: get_reg5_bits1110987(raw),
+            imm: (((raw & 0b0001000000000000) >> (12 - 5)) |
+                  ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32
+        },
+        (0b001, 0b10) => return Err(Error::Unimplemented("C.FLDSP")),
         (0b010, 0b10) => Inst::Load {
             dst: get_reg5_bits1110987(raw),
             width: 4, base: REG_X2,
@@ -239,7 +253,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
             },
             _ => return Err(Error::InvalidEncoding("C extension reserved space"))
         },
-        (0b101, 0b10) => unimplemented!("C.FSDSP"),
+        (0b101, 0b10) => return Err(Error::Unimplemented("C.FSDSP")),
         (0b110, 0b10) => Inst::Store {
             src: ((raw >> 2) & 0x1f) as Reg, width: 4, base: REG_X2,
             offset: (((raw & 0b0001111000000000) >> (9 - 2)) |
@@ -251,7 +265,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                      ((raw & 0b0000001110000000) >> ( 7 - 6))) as i32
         },
         (_____, 0b11) => panic!("this is not a compressed instruction"),
-        (_____, ____) => panic!("invalid range")
+        (_____, ____) => panic!("impossible?")
     })
 }
 
@@ -315,7 +329,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 0b100 => (1, false),
                 0b101 => (2, false),
                 0b110 => (4, false),
-                _ => unimplemented!()
+                _ => return Err(Error::InvalidEncoding("invalid load width/sign extension"))
             };
             Inst::Load {
                 dst: get_rd(raw), width, base: get_rs1(raw),
@@ -330,7 +344,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 0b001 => 2,
                 0b010 => 4,
                 0b011 => 8,
-                _ => return Err(Error::InvalidEncoding("store of invalid length"))
+                _ => return Err(Error::InvalidEncoding("invalid store length"))
             },
             base: get_rs1(raw),
             offset: sign_extend(
@@ -354,7 +368,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                     op: ALU::SRL, dst, src1, imm: (raw >> 20) & 0x3f },
                 0b101 if (get_funct7(raw) & !1) == 0b0100000 => Inst::ALUImm {
                     op: ALU::SRL, dst, src1, imm: (raw >> 20) & 0x3f },
-                _ => return Err(Error::Unimplemented("shifts"))
+                _ => return Err(Error::Unimplemented("ALU instruction extensions"))
             }
         },
         0b0110011 => {
@@ -366,11 +380,11 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 (0b000, 0b0100000) => Inst::ALUReg { op: ALU::Sub,  dst, src1, src2 },
                 (0b000, 0b0000001) => Inst::ALUReg { op: ALU::Mul,  dst, src1, src2 },
                 (0b001, 0b0000000) => Inst::ALUReg { op: ALU::SLL,  dst, src1, src2 },
-                (0b001, 0b0000001) => unimplemented!("mulh"),
+                (0b001, 0b0000001) => return Err(Error::Unimplemented("mulh")),
                 (0b010, 0b0000000) => Inst::ALUReg { op: ALU::SLT,  dst, src1, src2 },
-                (0b010, 0b0000001) => unimplemented!("mulhsu"),
+                (0b010, 0b0000001) => return Err(Error::Unimplemented("mulhsu")),
                 (0b011, 0b0000000) => Inst::ALUReg { op: ALU::SLTU, dst, src1, src2 },
-                (0b011, 0b0000001) => unimplemented!("mulhu"),
+                (0b011, 0b0000001) => return Err(Error::Unimplemented("mulhu")),
                 (0b100, 0b0000000) => Inst::ALUReg { op: ALU::XOr,  dst, src1, src2 },
                 (0b100, 0b0000001) => Inst::ALUReg { op: ALU::Div,  dst, src1, src2 },
                 (0b101, 0b0000000) => Inst::ALUReg { op: ALU::SRL,  dst, src1, src2 },
@@ -380,7 +394,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 (0b110, 0b0000001) => Inst::ALUReg { op: ALU::Rem,  dst, src1, src2 },
                 (0b111, 0b0000000) => Inst::ALUReg { op: ALU::And,  dst, src1, src2 },
                 (0b111, 0b0000001) => Inst::ALUReg { op: ALU::RemU, dst, src1, src2 },
-                _ => return Err(Error::InvalidEncoding("ALU opcode space"))
+                _ => return Err(Error::Unimplemented("ALU instruction extensions"))
             }
         },
         0b1110011 => {
@@ -420,7 +434,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 dst: get_rd(raw), src1: get_rs1(raw),
                 imm: get_rs2(raw) as u32
             },
-            _ => unimplemented!()
+            _ => return Err(Error::Unimplemented("0b0011011 opcode space"))
         },
         0b0111011 => match (get_funct7(raw), get_funct3(raw)) {
             (0b0000000, 0b000) => Inst::ALUReg {
@@ -463,7 +477,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 op: ALU::RemUW,
                 dst: get_rd(raw), src1: get_rs1(raw), src2: get_rs2(raw)
             },
-            _ => unimplemented!()
+            _ => return Err(Error::Unimplemented("0b0111011 opcode space"))
         },
         _ => return Err(Error::InvalidEncoding("unknown opcode"))
     }, 4))

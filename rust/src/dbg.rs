@@ -76,16 +76,16 @@ impl Inst {
             Inst::AddUpperImmediateToPC { dst, imm } =>
                 write!(w, "auipc\t{},{:#x}", reg_abi_name(dst), imm),
 
-            Inst::CtrlStatusReg { .. } => todo!(),
+            Inst::CtrlStatusReg { .. } => write!(w, "csr ???"),
 
             Inst::ALUImm { op: ALU::Add, dst: REG_ZR, src1: REG_ZR, imm: 0 } =>
                 write!(w, "nop"),
+            Inst::ALUImm { op: ALU::Add, dst, src1: REG_ZR, imm } =>
+                write!(w, "li\t{},{}", reg_abi_name(dst), imm as i32),
             Inst::ALUImm { op: ALU::Add, dst, src1, imm: 0 } =>
                 write!(w, "mv\t{},{}", reg_abi_name(dst), reg_abi_name(src1)),
             Inst::ALUReg { op: ALU::Add, dst, src1: REG_ZR, src2 } =>
                 write!(w, "mv\t{},{}", reg_abi_name(dst), reg_abi_name(src2)),
-            Inst::ALUImm { op: ALU::Add, dst, src1: REG_ZR, imm } =>
-                write!(w, "li\t{},{}", reg_abi_name(dst), imm as i32),
             Inst::ALUImm { op: ALU::XOr, dst, src1, imm: 0xffffffffu32 } =>
                 write!(w, "not\t{},{}", reg_abi_name(dst), reg_abi_name(src1)),
             Inst::ALUReg { op: ALU::Sub, dst, src1: REG_ZR, src2 } =>
@@ -125,6 +125,9 @@ impl Inst {
                     },
                     reg_abi_name(dst),
                     reg_abi_name(src1), imm as i32),
+
+            Inst::Unknown =>
+                write!(w, "???")
         }
     }
 }
