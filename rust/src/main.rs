@@ -1,45 +1,27 @@
 mod insts;
 mod cpu;
+mod dbg;
+
+use std::io::Write;
 
 use elf;
 use clap::{self, Parser};
+use insts::parse_instruction;
 
 #[derive(clap::Parser)]
 #[command(author, version, about)]
 struct Args {
     #[arg(short, long)]
-    file: String
+    file: String,
+
+    #[arg(short, long)]
+    dump: bool,
+
+    #[arg(short, long)]
+    exec: bool
 }
 
-fn main() {
-    let args = Args::parse();
-    let path = std::path::PathBuf::from(&args.file);
-    let raw_file = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("[simrv64i]: error reading {:?}: {:?}", &args.file, e);
-            std::process::exit(1);
-        }
-    };
-
-    let elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian> = match
-            elf::ElfBytes::minimal_parse(raw_file.as_slice()) {
-        Ok(elf_file) => elf_file,
-        Err(e) => {
-            eprintln!("[simrv64i]: error parsing ELF file {:?}: {:?}", &args.file, e);
-            std::process::exit(1);
-        }
-    };
-
-    if elf_file.ehdr.class != elf::file::Class::ELF64
-        || elf_file.ehdr.e_type != elf::abi::ET_EXEC
-        || elf_file.ehdr.e_machine != elf::abi::EM_RISCV {
-        eprintln!("[simrv64i]: error processing ELF file {:?}: {}", &args.file,
-            "class needs to be 64, type needs to be executable, and machine needs to be RISC-V");
-        std::process::exit(1);
-    }
-
-    // println!("[simrv64i]: ELF file header: {:?}", &elf_file.ehdr);
+fn execute(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
     let mut cpu = cpu::CPU::new();
     cpu.pc = elf_file.ehdr.e_entry as i64;
     let sections = elf_file.section_headers().expect("no sections");
@@ -72,10 +54,107 @@ fn main() {
         match cpu.step() {
             Ok(_) => continue,
             Err(e) => {
-                eprintln!("[simrv64i]: failed to execute instruction (at PC={:?}): {:?}", cpu.pc, e);
+                eprintln!("[simrv64i]: failed to execute instruction (at PC={:?}): {:?}",
+                          cpu.pc, e);
                 std::process::exit(1);
             }
         }
+    }
+}
+
+fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
+    let textsectionhdr = match elf_file.section_header_by_name(".text") {
+        Ok(Some(hdr)) => hdr,
+        Ok(None) => {
+            eprintln!("[simrv64i]: no '.text' section");
+            std::process::exit(1);
+        },
+        Err(e) => {
+            eprintln!("[simrv64i]: failed to read '.text' section: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let bytes = match elf_file.section_data(&textsectionhdr) {
+        Ok((data, None)) => data,
+        Ok((_, Some(_))) => {
+            eprintln!("[simrv64i]: failed to read '.text' section because its compressed");
+            std::process::exit(1);
+        },
+        Err(e) => {
+            eprintln!("[simrv64i]: failed to read '.text' section: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut stdout = std::io::stdout().lock();
+    let mut offset: usize = 0;
+    while offset < textsectionhdr.sh_size as usize {
+        let addr = textsectionhdr.sh_addr as usize + offset;
+        let raw =
+            ((bytes[offset + 0] as u32) <<  0) |
+            ((bytes[offset + 1] as u32) <<  8) |
+            ((bytes[offset + 2] as u32) << 16) |
+            ((bytes[offset + 3] as u32) << 24);
+        let (inst, size) = match parse_instruction(raw) {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("[simrv64i]: failed to parse instruction: {:?}", e);
+                eprintln!("            binary: {:032b} as address {:#x}", raw, addr);
+                // std::process::exit(1);
+
+                if (bytes[offset] & 0b11) == 0b11 {
+                    offset += 4;
+                } else {
+                    offset += 2;
+                }
+                continue;
+            }
+        };
+        write!(&mut stdout, "{:08x}({})\t", addr, size).unwrap();
+        inst.print(&mut stdout, addr as i64).expect("print to stdout failed");
+        write!(&mut stdout, "\n").unwrap();
+        stdout.flush().expect("stdout flush failed");
+        offset += size;
+    }
+}
+
+fn main() {
+    let args = Args::parse();
+    let path = std::path::PathBuf::from(&args.file);
+    let raw_file = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("[simrv64i]: error reading {:?}: {:?}", &args.file, e);
+            std::process::exit(1);
+        }
+    };
+
+    let elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian> = match
+            elf::ElfBytes::minimal_parse(raw_file.as_slice()) {
+        Ok(elf_file) => elf_file,
+        Err(e) => {
+            eprintln!("[simrv64i]: error parsing ELF file {:?}: {:?}", &args.file, e);
+            std::process::exit(1);
+        }
+    };
+
+    if elf_file.ehdr.class != elf::file::Class::ELF64
+        || elf_file.ehdr.e_type != elf::abi::ET_EXEC
+        || elf_file.ehdr.e_machine != elf::abi::EM_RISCV {
+        eprintln!("[simrv64i]: error processing ELF file {:?}: {}", &args.file,
+            "class needs to be 64, type needs to be executable, and machine needs to be RISC-V");
+        std::process::exit(1);
+    }
+
+    if args.dump {
+        dump_text_section(elf_file, &raw_file);
+        return;
+    }
+
+    if args.exec {
+        execute(elf_file, &raw_file);
+        return;
     }
 }
 
