@@ -2,6 +2,8 @@ use crate::cpu;
 
 pub type Reg = u8;
 pub const REG_ZR: Reg = 0;
+pub const REG_X1: Reg = 2;
+pub const REG_X2: Reg = 2;
 
 fn sign_extend(x: u32, sign_bit: u32) -> u32 {
     let m = 1u32 << (sign_bit - 1u32);
@@ -9,13 +11,13 @@ fn sign_extend(x: u32, sign_bit: u32) -> u32 {
     (x ^ m).wrapping_sub(m)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Predicate { EQ, NE, LT, LTU, GE, GEU }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum CSR { RW, RS, RC, RWI, RSI, RCI }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ALU {
     Add, AddW, Sub, SubW, And, Or, XOr,
     SLT, SLTU,
@@ -27,7 +29,7 @@ pub enum ALU {
 
 #[derive(Debug, Clone)]
 pub enum Inst {
-    Load { dst: Reg, width: u8, base: Reg, offset: i32 },
+    Load { dst: Reg, width: u8, base: Reg, offset: i32, signext: bool },
     Store { src: Reg, width: u8, base: Reg, offset: i32 },
     JumpAndLink { dst: Reg, offset: i32 },
     JumpAndLinkReg { dst: Reg, base: Reg, offset: i32 },
@@ -55,57 +57,201 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
 
     fn get_reg5_bits1110987(raw: u16) -> Reg { ((raw >> 7) & 0b11111) as Reg }
 
-    fn get_uimm_53_26(raw: u16) -> u16 {
-        ((raw & 0b0000000000100000) << ( 6 - 5)) |
-        ((raw & 0b0000000001000000) >> ( 6 - 2)) |
-        ((raw & 0b0001110000000000) >> (10 - 3))
-    }
-
-    fn get_uimm_53_76(raw: u16) -> u16 {
-        ((raw & 0b0000000001100000) << ( 6 - 5)) |
-        ((raw & 0b0001110000000000) >> (10 - 3))
-    }
-
-    fn get_nzimm_bits1265432(raw: u16) -> u32 {
-        sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
-                     ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 5)
-    }
-
     Ok(match ((raw >> 13) & 0b111, raw & 0b11) {
         (0b000, 0b00) if raw == 0 => return Err(Error::Illegal),
         (0b000, 0b00) => Inst::ALUImm {
             op: ALU::Add, dst: get_reg3_bits432(raw), src1: 2,
-            imm: (((raw & 0b000000100000) >> (5 - 3)) |
-                  ((raw & 0b000001000000) >> (6 - 2)) |
-                  ((raw & 0b000110000000) >> (7 - 6)) |
-                  ((raw & 0b011000000000) >> (8 - 4))) as u32
+            imm: (((raw & 0b0000000000100000) >> ( 5 - 3)) |
+                  ((raw & 0b0000000001000000) >> ( 6 - 2)) |
+                  ((raw & 0b0000011110000000) >> ( 7 - 6)) |
+                  ((raw & 0b0001100000000000) >> (11 - 4))) as u32
         },
         (0b001, 0b00) => unimplemented!("C.FLD"),
         (0b010, 0b00) => Inst::Load {
             dst: get_reg3_bits432(raw), width: 4, base: get_reg3_bits987(raw),
-            offset: get_uimm_53_26(raw) as i32
+            offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
+                     ((raw & 0b0000000001000000) >> ( 6 - 2)) |
+                     ((raw & 0b0000000000100000) << ( 6 - 5))) as i32,
+            signext: true
         },
         (0b011, 0b00) => Inst::Load {
             dst: get_reg3_bits432(raw), width: 8, base: get_reg3_bits987(raw),
-            offset: get_uimm_53_76(raw) as i32
+            offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
+                     ((raw & 0b0000000001100000) << ( 6 - 5))) as i32,
+            signext: true
         },
         (0b100, 0b00) => return Err(Error::InvalidEncoding("C extension reserved space")),
         (0b101, 0b00) => unimplemented!("C.FSD"),
         (0b110, 0b00) => Inst::Store {
             src: get_reg3_bits432(raw), width: 4, base: get_reg3_bits987(raw),
-            offset: get_uimm_53_26(raw) as i32
+            offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
+                     ((raw & 0b0000000001000000) >> ( 6 - 2)) |
+                     ((raw & 0b0000000000100000) << ( 6 - 5))) as i32
         },
         (0b111, 0b00) => Inst::Store {
             src: get_reg3_bits432(raw), width: 8, base: get_reg3_bits987(raw),
-            offset: get_uimm_53_76(raw) as i32
+            offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
+                     ((raw & 0b0000000001000000) >> ( 6 - 5))) as i32
         },
-        (0b000, 0b01) => Inst::ALUImm {
+        (0b000, 0b01) => Inst::ALUImm { // C.ADDI
             op: ALU::Add,
             dst: get_reg5_bits1110987(raw),
             src1: get_reg5_bits1110987(raw),
-            imm: get_nzimm_bits1265432(raw)
+            imm: sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
+                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 5)
         },
-        _ => unimplemented!()
+        (0b001, 0b01) => Inst::ALUImm { // C.ADDIW
+            op: ALU::AddW,
+            dst: get_reg5_bits1110987(raw),
+            src1: get_reg5_bits1110987(raw),
+            imm: sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
+                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 5)
+        },
+        (0b010, 0b01) => Inst::ALUImm { // C.LI
+            op: ALU::Add,
+            dst: get_reg5_bits1110987(raw),
+            src1: REG_ZR,
+            imm: sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
+                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 5)
+        },
+        (0b011, 0b01) => match get_reg5_bits1110987(raw) {
+            2 => Inst::ALUImm { // C.ADDI16SP
+                op: ALU::Add,
+                dst: REG_X2,
+                src1: REG_X2,
+                imm: sign_extend((
+                    ((raw & 0b0001000000000000) >> (12 - 9)) |
+                    ((raw & 0b0000000001000000) >> (6  - 4)) |
+                    ((raw & 0b0000000000100000) << (6  - 5)) |
+                    ((raw & 0b0000000000011000) << (7  - 3)) |
+                    ((raw & 0b0000000000000100) >> (5  - 2))) as u32, 9)
+            },
+            0 => return Err(Error::InvalidEncoding("C extension reserved space")),
+            rd => Inst::LoadUpperImmediate {
+                dst: rd,
+                imm: (((raw & 0b0001000000000000) << (17 - 12)) |
+                      ((raw & 0b0000000001111100) << (12 -  2))) as u32
+            }
+        },
+        (0b100, 0b01) => match ((raw >> 10) & 0b11, get_reg3_bits987(raw)) {
+            (0b00, _) => unimplemented!("WTF is this C.SRLI64 shit?"),
+            (0b01, _) => unimplemented!("WTF is this C.SRAI64 shit?"),
+            (0b10, rd) => Inst::ALUImm {
+                op: ALU::And,
+                dst: rd, src1: rd,
+                imm: (((raw & 0b0001000000000000) << (17 - 12)) |
+                      ((raw & 0b0000000001111100) << (12 -  2))) as u32
+            },
+            (0b11, rd) => match ((raw >> 12) & 0b1, (raw >> 5) & 0b11) {
+                (0b0, 0b00) => Inst::ALUReg {
+                    op: ALU::Sub,
+                    dst: rd, src1: rd, src2: get_reg3_bits432(raw)
+                },
+                (0b0, 0b01) => Inst::ALUReg {
+                    op: ALU::XOr,
+                    dst: rd, src1: rd, src2: get_reg3_bits432(raw)
+                },
+                (0b0, 0b10) => Inst::ALUReg {
+                    op: ALU::Or,
+                    dst: rd, src1: rd, src2: get_reg3_bits432(raw)
+                },
+                (0b0, 0b11) => Inst::ALUReg {
+                    op: ALU::And,
+                    dst: rd, src1: rd, src2: get_reg3_bits432(raw)
+                },
+                (0b1, 0b00) => Inst::ALUReg {
+                    op: ALU::SubW,
+                    dst: rd, src1: rd, src2: get_reg3_bits432(raw)
+                },
+                (0b1, 0b01) => Inst::ALUReg {
+                    op: ALU::Sub,
+                    dst: rd, src1: rd, src2: get_reg3_bits432(raw)
+                },
+                _ => return Err(Error::InvalidEncoding("C extension reserved space"))
+            },
+            _ => unimplemented!()
+        },
+        (0b101, 0b01) => Inst::JumpAndLink {
+            dst: REG_ZR,
+            offset: sign_extend(
+                (((raw & 0b0001000000000000) >> (12 - 11)) |
+                 ((raw & 0b0000100000000000) >> (11 -  4)) |
+                 ((raw & 0b0000011000000000) >> ( 9 -  8)) |
+                 ((raw & 0b0000000100000000) << (10 -  8)) |
+                 ((raw & 0b0000000010000000) >> ( 7 -  6)) |
+                 ((raw & 0b0000000001000000) << ( 7 -  6)) |
+                 ((raw & 0b0000000000111000) >> ( 3 -  1)) |
+                 ((raw & 0b0000000000000100) << ( 5 -  2))) as u32, 11) as i32
+        },
+        (0b110, 0b01) => Inst::Branch {
+            pred: Predicate::EQ,
+            src1: get_reg3_bits987(raw),
+            src2: REG_ZR,
+            offset: sign_extend(
+                (((raw & 0b0001000000000000) >> (12 - 8)) |
+                 ((raw & 0b0000110000000000) >> (10 - 3)) |
+                 ((raw & 0b0000000001100000) << ( 6 - 5)) |
+                 ((raw & 0b0000000000011000) >> ( 3 - 1)) |
+                 ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 8) as i32
+        },
+        (0b111, 0b01) => Inst::Branch {
+            pred: Predicate::NE,
+            src1: get_reg3_bits987(raw),
+            src2: REG_ZR,
+            offset: sign_extend(
+                (((raw & 0b0001000000000000) >> (12 - 8)) |
+                 ((raw & 0b0000110000000000) >> (10 - 3)) |
+                 ((raw & 0b0000000001100000) << ( 6 - 5)) |
+                 ((raw & 0b0000000000011000) >> ( 3 - 1)) |
+                 ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 8) as i32
+        },
+        (0b000, 0b10) => unimplemented!("WTF is this C.SLLI64 shit?"),
+        (0b001, 0b10) => unimplemented!("C.FLDSP"),
+        (0b010, 0b10) => Inst::Load {
+            dst: get_reg5_bits1110987(raw),
+            width: 4, base: REG_X2,
+            offset: (((raw & 0b0001000000000000) >> (12 - 5)) |
+                     ((raw & 0b0000000001110000) >> ( 4 - 2)) |
+                     ((raw & 0b0000000000001100) << ( 6 - 2))) as i32,
+            signext: true
+        },
+        (0b011, 0b10) => Inst::Load {
+            dst: get_reg5_bits1110987(raw),
+            width: 8, base: REG_X2,
+            offset: (((raw & 0b0001000000000000) >> (12 - 5)) |
+                     ((raw & 0b0000000001100000) >> ( 5 - 3)) |
+                     ((raw & 0b0000000000011100) << ( 8 - 4))) as i32,
+            signext: true
+        },
+        (0b100, 0b10) => match ((raw >> 12) & 1, (raw >> 7) & 0x1f, (raw >> 2) & 0x1f) {
+            (0, rs1, 0) if rs1 != 0 => Inst::JumpAndLinkReg {
+                dst: REG_ZR, base: rs1 as Reg, offset: 0
+            },
+            (0, rd, rs2) if rd != 0 && rs2 != 0 => Inst::ALUReg {
+                op: ALU::Add, dst: rd as Reg, src1: REG_ZR, src2: rs2 as Reg
+            },
+            (1, 0, 0) => Inst::EBreak { _priv: 0 },
+            (1, rs1, 0) if rs1 != 0 => Inst::JumpAndLinkReg {
+                dst: REG_X1, base: rs1 as Reg, offset: 0
+            },
+            (1, rd, rs2) if rd != 0 && rs2 != 0 => Inst::ALUReg {
+                op: ALU::Add, dst: rd as Reg, src1: rd as Reg, src2: rs2 as Reg
+            },
+            _ => return Err(Error::InvalidEncoding("C extension reserved space"))
+        },
+        (0b101, 0b10) => unimplemented!("C.FSDSP"),
+        (0b110, 0b10) => Inst::Store {
+            src: ((raw >> 2) & 0x1f) as Reg, width: 4, base: REG_X2,
+            offset: (((raw & 0b0001111000000000) >> (9 - 2)) |
+                     ((raw & 0b0000000110000000) >> (7 - 6))) as i32
+        },
+        (0b111, 0b10) => Inst::Store {
+            src: ((raw >> 2) & 0x1f) as Reg, width: 8, base: REG_X2,
+            offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
+                     ((raw & 0b0000001110000000) >> ( 7 - 6))) as i32
+        },
+        (_____, 0b11) => panic!("this is not a compressed instruction"),
+        (_____, ____) => panic!("invalid range")
     })
 }
 
@@ -160,17 +306,22 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 ((raw & 0x00000f00) >> ( 8 -  1)) |
                 ((raw & 0x00000080) << 4), 12) as i32
         },
-        0b0000011 => Inst::Load {
-            dst: get_rd(raw),
-            width: match get_funct3(raw) {
-                0b000 => 1,
-                0b001 => 2,
-                0b010 => 4,
-                0b011 => 8,
-                _ => return Err(Error::Unimplemented("sign-extending loads"))
-            },
-            base: get_rs1(raw),
-            offset: sign_extend((raw & 0xfff00000) >> 20, 12) as i32
+        0b0000011 => {
+            let (width, signext) = match get_funct3(raw) {
+                0b000 => (1, true),
+                0b001 => (2, true),
+                0b010 => (4, true),
+                0b011 => (8, true),
+                0b100 => (1, false),
+                0b101 => (2, false),
+                0b110 => (4, false),
+                _ => unimplemented!()
+            };
+            Inst::Load {
+                dst: get_rd(raw), width, base: get_rs1(raw),
+                offset: sign_extend((raw & 0xfff00000) >> 20, 12) as i32,
+                signext
+            }
         },
         0b0100011 => Inst::Store {
             src: get_rs2(raw),
@@ -215,8 +366,11 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 (0b000, 0b0100000) => Inst::ALUReg { op: ALU::Sub,  dst, src1, src2 },
                 (0b000, 0b0000001) => Inst::ALUReg { op: ALU::Mul,  dst, src1, src2 },
                 (0b001, 0b0000000) => Inst::ALUReg { op: ALU::SLL,  dst, src1, src2 },
+                (0b001, 0b0000001) => unimplemented!("mulh"),
                 (0b010, 0b0000000) => Inst::ALUReg { op: ALU::SLT,  dst, src1, src2 },
+                (0b010, 0b0000001) => unimplemented!("mulhsu"),
                 (0b011, 0b0000000) => Inst::ALUReg { op: ALU::SLTU, dst, src1, src2 },
+                (0b011, 0b0000001) => unimplemented!("mulhu"),
                 (0b100, 0b0000000) => Inst::ALUReg { op: ALU::XOr,  dst, src1, src2 },
                 (0b100, 0b0000001) => Inst::ALUReg { op: ALU::Div,  dst, src1, src2 },
                 (0b101, 0b0000000) => Inst::ALUReg { op: ALU::SRL,  dst, src1, src2 },
@@ -350,13 +504,23 @@ pub fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
                 return
             }
         },
-        Inst::Load { dst, width, base, offset } => {
+        Inst::Load { dst, width, base, offset, signext: false } => {
             let addr = ((cpu.get_reg(base) as i64) + offset as i64) as usize;
             cpu.set_reg(dst, match width {
                 1 => cpu.memory.load_u8(addr) as u64,
                 2 => cpu.memory.load_u16(addr) as u64,
                 4 => cpu.memory.load_u32(addr) as u64,
                 8 => cpu.memory.load_u64(addr) as u64,
+                _ => unimplemented!()
+            });
+        },
+        Inst::Load { dst, width, base, offset, signext: true } => {
+            let addr = ((cpu.get_reg(base) as i64) + offset as i64) as usize;
+            cpu.set_reg(dst, match width {
+                1 => cpu.memory.load_u8(addr) as i64 as u64,
+                2 => cpu.memory.load_u16(addr) as i64 as u64,
+                4 => cpu.memory.load_u32(addr) as i64 as u64,
+                8 => cpu.memory.load_u64(addr) as i64 as u64,
                 _ => unimplemented!()
             });
         },
