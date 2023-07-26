@@ -30,7 +30,7 @@ impl Inst {
                     reg_abi_name(src), offset, reg_abi_name(base)),
 
             Inst::JumpAndLink { dst: REG_ZR, offset } =>
-                write!(w, "j\t{:x}", address - (offset as i64)),
+                write!(w, "j\t{:x}", address + (offset as i64)),
             Inst::JumpAndLink { dst, offset } =>
                 write!(w, "jal\t{},{:x}", reg_abi_name(dst), address + (offset as i64)),
             Inst::JumpAndLinkReg { dst: REG_ZR, base: REG_X1, offset: 0 } =>
@@ -41,7 +41,7 @@ impl Inst {
                 write!(w, "jalr\t{}", reg_abi_name(base)),
             Inst::JumpAndLinkReg { dst, base, offset } =>
                 write!(w, "jalr\t{},{},{:x}",
-                    reg_abi_name(dst), reg_abi_name(base), address + (offset as i64)),
+                    reg_abi_name(dst), reg_abi_name(base), offset),
 
             Inst::Branch { pred: Predicate::EQ, src1, src2: REG_ZR, offset } =>
                 write!(w, "beqz\t{},{:x}", reg_abi_name(src1), address + (offset as i64)),
@@ -72,9 +72,9 @@ impl Inst {
             Inst::EBreak { _priv } => write!(w, "ebreak"),
 
             Inst::LoadUpperImmediate { dst, imm } =>
-                write!(w, "lui\t{},{:#x}", reg_abi_name(dst), imm),
+                write!(w, "lui\t{},{:#x}", reg_abi_name(dst), imm >> 12),
             Inst::AddUpperImmediateToPC { dst, imm } =>
-                write!(w, "auipc\t{},{:#x}", reg_abi_name(dst), imm),
+                write!(w, "auipc\t{},{:#x}", reg_abi_name(dst), imm >> 12),
 
             Inst::CtrlStatusReg { .. } => write!(w, "csr ???"),
 
@@ -92,6 +92,8 @@ impl Inst {
                 write!(w, "neg\t{},{}", reg_abi_name(dst), reg_abi_name(src2)),
             Inst::ALUReg { op: ALU::SubW, dst, src1: REG_ZR, src2 } =>
                 write!(w, "negw\t{},{}", reg_abi_name(dst), reg_abi_name(src2)),
+            Inst::ALUImm { op: ALU::AddW, dst, src1, imm: 0 } =>
+                write!(w, "sext.w\t{},{}", reg_abi_name(dst), reg_abi_name(src1)),
 
             Inst::ALUReg { op, dst, src1, src2 } =>
                 write!(w, "{}\t{},{},{}",
@@ -112,15 +114,25 @@ impl Inst {
                     reg_abi_name(dst),
                     reg_abi_name(src1), reg_abi_name(src2)),
 
+            Inst::ALUImm { op: ALU::SLL, dst, src1, imm } =>
+                write!(w, "slli\t{},{},{:#x}", reg_abi_name(dst), reg_abi_name(src1), imm),
+            Inst::ALUImm { op: ALU::SLLW, dst, src1, imm } =>
+                write!(w, "slliw\t{},{},{:#x}", reg_abi_name(dst), reg_abi_name(src1), imm),
+            Inst::ALUImm { op: ALU::SRL, dst, src1, imm } =>
+                write!(w, "srli\t{},{},{:#x}", reg_abi_name(dst), reg_abi_name(src1), imm),
+            Inst::ALUImm { op: ALU::SRLW, dst, src1, imm } =>
+                write!(w, "srliw\t{},{},{:#x}", reg_abi_name(dst), reg_abi_name(src1), imm),
+            Inst::ALUImm { op: ALU::SRA, dst, src1, imm } =>
+                write!(w, "srai\t{},{},{:#x}", reg_abi_name(dst), reg_abi_name(src1), imm),
+            Inst::ALUImm { op: ALU::SRAW, dst, src1, imm } =>
+                write!(w, "sraiw\t{},{},{:#x}", reg_abi_name(dst), reg_abi_name(src1), imm),
+
             Inst::ALUImm { op, dst, src1, imm } =>
                 write!(w, "{}\t{},{},{}",
                     match op {
                         ALU::Add => "addi", ALU::AddW => "addiw",
                         ALU::And => "andi", ALU::Or   => "ori", ALU::XOr => "xori",
                         ALU::SLT => "slti", ALU::SLTU => "sltiu",
-                        ALU::SLL => "slli", ALU::SLLW => "slliw",
-                        ALU::SRL => "srli", ALU::SRLW => "srliw",
-                        ALU::SRA => "srai", ALU::SRAW => "sraiw",
                         _ => panic!("{:?} has a immediate variant?", op)
                     },
                     reg_abi_name(dst),

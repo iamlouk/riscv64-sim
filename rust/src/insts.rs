@@ -2,7 +2,7 @@ use crate::cpu;
 
 pub type Reg = u8;
 pub const REG_ZR: Reg = 0;
-pub const REG_X1: Reg = 2;
+pub const REG_X1: Reg = 1;
 pub const REG_X2: Reg = 2;
 
 fn sign_extend(x: u32, sign_bit: u32) -> u32 {
@@ -61,7 +61,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
     Ok(match ((raw >> 13) & 0b111, raw & 0b11) {
         (0b000, 0b00) if raw == 0 => return Err(Error::Illegal),
         (0b000, 0b00) => Inst::ALUImm {
-            op: ALU::Add, dst: get_reg3_bits432(raw), src1: 2,
+            op: ALU::Add, dst: get_reg3_bits432(raw), src1: REG_X2,
             imm: (((raw & 0b0000000000100000) >> ( 5 - 3)) |
                   ((raw & 0b0000000001000000) >> ( 6 - 2)) |
                   ((raw & 0b0000011110000000) >> ( 7 - 6)) |
@@ -122,10 +122,10 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                 src1: REG_X2,
                 imm: sign_extend((
                     ((raw & 0b0001000000000000) >> (12 - 9)) |
-                    ((raw & 0b0000000001000000) >> (6  - 4)) |
-                    ((raw & 0b0000000000100000) << (6  - 5)) |
-                    ((raw & 0b0000000000011000) << (7  - 3)) |
-                    ((raw & 0b0000000000000100) >> (5  - 2))) as u32, 9)
+                    ((raw & 0b0000000001000000) >> ( 6 - 4)) |
+                    ((raw & 0b0000000000100000) << ( 6 - 5)) |
+                    ((raw & 0b0000000000011000) << ( 7 - 3)) |
+                    ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 9)
             },
             0 => return Err(Error::InvalidEncoding("C extension reserved space")),
             rd => Inst::LoadUpperImmediate {
@@ -417,7 +417,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
             (_, 0b000) => Inst::ALUImm {
                 op: ALU::AddW,
                 dst: get_rd(raw), src1: get_rs1(raw),
-                imm: sign_extend((raw >> 20) & 0x1ff, 11)
+                imm: sign_extend((raw >> 20) & 0xfff, 11)
             },
             (0b0000000, 0b001) => Inst::ALUImm {
                 op: ALU::SLLW,
