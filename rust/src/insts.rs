@@ -5,10 +5,9 @@ pub const REG_ZR: Reg = 0;
 pub const REG_X1: Reg = 1;
 pub const REG_X2: Reg = 2;
 
-fn sign_extend(x: u32, sign_bit: u32) -> u32 {
-    let m = 1u32 << (sign_bit - 1u32);
-    let x = x & ((1u32 << sign_bit) - 1u32);
-    (x ^ m).wrapping_sub(m)
+fn sign_extend(x: u32, nbits: u32) -> u32 {
+    let notherbits = std::mem::size_of_val(&x) as u32 * 8 - nbits;
+    (x as i32).wrapping_shl(notherbits).wrapping_shr(notherbits) as u32
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -99,21 +98,21 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
             dst: get_reg5_bits1110987(raw),
             src1: get_reg5_bits1110987(raw),
             imm: sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
-                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 5)
+                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 6)
         },
         (0b001, 0b01) => Inst::ALUImm { // C.ADDIW
             op: ALU::AddW,
             dst: get_reg5_bits1110987(raw),
             src1: get_reg5_bits1110987(raw),
             imm: sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
-                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 5)
+                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 6)
         },
         (0b010, 0b01) => Inst::ALUImm { // C.LI
             op: ALU::Add,
             dst: get_reg5_bits1110987(raw),
             src1: REG_ZR,
             imm: sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
-                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 5)
+                              ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 6)
         },
         (0b011, 0b01) => match get_reg5_bits1110987(raw) {
             2 => Inst::ALUImm { // C.ADDI16SP
@@ -125,7 +124,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                     ((raw & 0b0000000001000000) >> ( 6 - 4)) |
                     ((raw & 0b0000000000100000) << ( 6 - 5)) |
                     ((raw & 0b0000000000011000) << ( 7 - 3)) |
-                    ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 9)
+                    ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 10)
             },
             0 => return Err(Error::InvalidEncoding("C extension reserved space")),
             rd => Inst::LoadUpperImmediate {
@@ -148,8 +147,8 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
             (0b10, rd) => Inst::ALUImm {
                 op: ALU::And,
                 dst: rd, src1: rd,
-                imm: (((raw & 0b0001000000000000) << (17 - 12)) |
-                      ((raw & 0b0000000001111100) << (12 -  2))) as u32
+                imm: sign_extend((((raw & 0b0001000000000000) >> (12 - 5)) |
+                                  ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32, 6)
             },
             (0b11, rd) => match ((raw >> 12) & 0b1, (raw >> 5) & 0b11) {
                 (0b0, 0b00) => Inst::ALUReg {
@@ -173,7 +172,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                     dst: rd, src1: rd, src2: get_reg3_bits432(raw)
                 },
                 (0b1, 0b01) => Inst::ALUReg {
-                    op: ALU::Sub,
+                    op: ALU::AddW,
                     dst: rd, src1: rd, src2: get_reg3_bits432(raw)
                 },
                 _ => return Err(Error::InvalidEncoding("C extension reserved space"))
@@ -201,7 +200,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                  ((raw & 0b0000110000000000) >> (10 - 3)) |
                  ((raw & 0b0000000001100000) << ( 6 - 5)) |
                  ((raw & 0b0000000000011000) >> ( 3 - 1)) |
-                 ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 8) as i32
+                 ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 9) as i32
         },
         (0b111, 0b01) => Inst::Branch {
             pred: Predicate::NE,
@@ -212,7 +211,7 @@ pub fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                  ((raw & 0b0000110000000000) >> (10 - 3)) |
                  ((raw & 0b0000000001100000) << ( 6 - 5)) |
                  ((raw & 0b0000000000011000) >> ( 3 - 1)) |
-                 ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 8) as i32
+                 ((raw & 0b0000000000000100) << ( 5 - 2))) as u32, 9) as i32
         },
         (0b000, 0b10) => Inst::ALUImm {
             op: ALU::SLL,
@@ -355,6 +354,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
             let dst = get_rd(raw);
             let src1 = get_rs1(raw);
             let imm12 = sign_extend((raw & 0xfff00000) >> 20, 12);
+            let funct7 = get_funct7(raw) & !1;
             match get_funct3(raw) {
                 0b000 => Inst::ALUImm { op: ALU::Add,  dst, src1, imm: imm12 },
                 0b010 => Inst::ALUImm { op: ALU::SLT,  dst, src1, imm: imm12 },
@@ -362,12 +362,12 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
                 0b100 => Inst::ALUImm { op: ALU::XOr,  dst, src1, imm: imm12 },
                 0b110 => Inst::ALUImm { op: ALU::Or,   dst, src1, imm: imm12 },
                 0b111 => Inst::ALUImm { op: ALU::And,  dst, src1, imm: imm12 },
-                0b001 if (get_funct7(raw) & !1) == 0 => Inst::ALUImm {
+                0b001 if funct7 == 0b0000000 => Inst::ALUImm {
                     op: ALU::SLL, dst, src1, imm: (raw >> 20) & 0x3f },
-                0b101 if (get_funct7(raw) & !1) == 0 => Inst::ALUImm {
+                0b101 if funct7 == 0b0000000 => Inst::ALUImm {
                     op: ALU::SRL, dst, src1, imm: (raw >> 20) & 0x3f },
-                0b101 if (get_funct7(raw) & !1) == 0b0100000 => Inst::ALUImm {
-                    op: ALU::SRL, dst, src1, imm: (raw >> 20) & 0x3f },
+                0b101 if funct7 == 0b0100000 => Inst::ALUImm {
+                    op: ALU::SRA, dst, src1, imm: (raw >> 20) & 0x3f },
                 _ => return Err(Error::Unimplemented("ALU instruction extensions"))
             }
         },
@@ -417,7 +417,7 @@ pub fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
             (_, 0b000) => Inst::ALUImm {
                 op: ALU::AddW,
                 dst: get_rd(raw), src1: get_rs1(raw),
-                imm: sign_extend((raw >> 20) & 0xfff, 11)
+                imm: sign_extend((raw >> 20) & 0xfff, 12)
             },
             (0b0000000, 0b001) => Inst::ALUImm {
                 op: ALU::SLLW,

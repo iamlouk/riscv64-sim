@@ -94,6 +94,10 @@ impl Inst {
                 write!(w, "negw\t{},{}", reg_abi_name(dst), reg_abi_name(src2)),
             Inst::ALUImm { op: ALU::AddW, dst, src1, imm: 0 } =>
                 write!(w, "sext.w\t{},{}", reg_abi_name(dst), reg_abi_name(src1)),
+            Inst::ALUImm { op: ALU::SLTU, dst, src1, imm: 1 } =>
+                write!(w, "seqz\t{},{}", reg_abi_name(dst), reg_abi_name(src1)),
+            Inst::ALUReg { op: ALU::SLTU, dst, src1: REG_ZR, src2 } =>
+                write!(w, "snez\t{},{}", reg_abi_name(dst), reg_abi_name(src2)),
 
             Inst::ALUReg { op, dst, src1, src2 } =>
                 write!(w, "{}\t{},{},{}",

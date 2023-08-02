@@ -8,6 +8,8 @@ use elf;
 use clap::{self, Parser};
 use insts::{Inst, parse_instruction};
 
+use crate::insts::REG_X2;
+
 #[derive(clap::Parser)]
 #[command(author, version, about)]
 struct Args {
@@ -24,11 +26,34 @@ struct Args {
 fn execute(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
     let mut cpu = cpu::CPU::new();
     cpu.pc = elf_file.ehdr.e_entry as i64;
-    let sections = elf_file.section_headers().expect("no sections");
+
+    let (sections, string_table) = match elf_file.section_headers_with_strtab() {
+        Ok((sections, string_table)) => match (sections, string_table) {
+            (Some(sections), Some(string_table)) => (sections, string_table),
+            (None, _) => {
+                eprintln!("[simrv64i]: no section headers");
+                std::process::exit(1);
+            },
+            (_, None) => {
+                eprintln!("[simrv64i]: no section headers");
+                std::process::exit(1);
+            }
+        },
+        Err(e) => {
+            eprintln!("[simrv64i]: failed to parse headers and string table: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    eprintln!("[simrv64i]: PC = {:#08x}", cpu.pc);
     for section in sections {
         if section.sh_type != elf::abi::SHT_PROGBITS || section.sh_size == 0 {
             continue;
         }
+
+        let name = string_table.get(section.sh_name as usize).unwrap_or("<unnamed>");
+        eprintln!("[simrv64i]: {:#08x} - {:#08x}: section {:?} ({} bytes)",
+            section.sh_addr, section.sh_addr + section.sh_size, name, section.sh_size);
 
         let bytes = match elf_file.section_data(&section) {
             Ok((data, None)) => data,
@@ -50,6 +75,10 @@ fn execute(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
         cpu.memory.copy_bulk(section.sh_addr, bytes);
     }
 
+    let top_of_stack = 0xffffffu64;
+    cpu.set_reg(REG_X2, top_of_stack);
+
+    eprintln!("[simrv64i]: starting VM...");
     loop {
         match cpu.step() {
             Ok(_) => continue,
@@ -62,7 +91,8 @@ fn execute(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
     }
 }
 
-fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) -> std::io::Result<()> {
+fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>)
+        -> std::io::Result<()> {
     let textsectionhdr = match elf_file.section_header_by_name(".text") {
         Ok(Some(hdr)) => hdr,
         Ok(None) => {
