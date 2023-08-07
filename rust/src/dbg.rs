@@ -33,11 +33,11 @@ impl Inst {
                 write!(w, "j\t{:x}", address + (offset as i64)),
             Inst::JumpAndLink { dst, offset } =>
                 write!(w, "jal\t{},{:x}", reg_abi_name(dst), address + (offset as i64)),
-            Inst::JumpAndLinkReg { dst: REG_ZR, base: REG_X1, offset: 0 } =>
+            Inst::JumpAndLinkReg { dst: REG_ZR, base: REG_RA, offset: 0 } =>
                 write!(w, "ret"),
             Inst::JumpAndLinkReg { dst: REG_ZR, base, offset: 0 } =>
                 write!(w, "jr\t{}", reg_abi_name(base)),
-            Inst::JumpAndLinkReg { dst: REG_X1, base, offset: 0 } =>
+            Inst::JumpAndLinkReg { dst: REG_RA, base, offset: 0 } =>
                 write!(w, "jalr\t{}", reg_abi_name(base)),
             Inst::JumpAndLinkReg { dst, base, offset } =>
                 write!(w, "jalr\t{},{},{:x}",
@@ -94,6 +94,8 @@ impl Inst {
                 write!(w, "negw\t{},{}", reg_abi_name(dst), reg_abi_name(src2)),
             Inst::ALUImm { op: ALU::AddW, dst, src1, imm: 0 } =>
                 write!(w, "sext.w\t{},{}", reg_abi_name(dst), reg_abi_name(src1)),
+            Inst::ALUImm { op: ALU::And, dst, src1, imm: 255 } =>
+                write!(w, "zext.b\t{},{}", reg_abi_name(dst), reg_abi_name(src1)),
             Inst::ALUImm { op: ALU::SLTU, dst, src1, imm: 1 } =>
                 write!(w, "seqz\t{},{}", reg_abi_name(dst), reg_abi_name(src1)),
             Inst::ALUReg { op: ALU::SLTU, dst, src1: REG_ZR, src2 } =>
