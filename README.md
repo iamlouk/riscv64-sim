@@ -18,8 +18,17 @@ riscv64-linux-gnu-as ./tests/examples/hello-world.s -o hello-world.o
 riscv64-linux-gnu-ld -static hello-world.o -o hello-world.elf
 
 # Run the RISC-V executable:
-cargo run -- -f ./hello-world.elf
+cargo run -- -f ./hello-world.elf -e
+
+# Build a example using a libc (newlib):
+pacman -S extra/riscv64-elf-newlib extra/riscv64-elf-gcc
+riscv64-elf-gcc -O1 -static ./tests/examples/hello-world.c -o hello-world.newlib.elf
+cargo run -- -f ./hello-world.newlib.elf -e
 ```
+
+The rust version is actually capable of running a libc/newlib *Hello World* program. Only a select few of syscalls are implemented, so you might hit a limit soon. The C version does not support syscalls, only the most basic UART ever.
+
+Be warned that *newlib* will, before it makes the `exit` syscall, close *stdout*. This will close the actual *stdout* of the simulator process, so that, in verbose mode, you will not see the `exit` syscall beeing called anymore.
 
 ### Bare-Metal WASM RISC-V Simulator in C
 

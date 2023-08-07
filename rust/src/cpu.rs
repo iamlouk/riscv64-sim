@@ -1,7 +1,7 @@
 use crate::insts::*;
 use syscalls::{syscall, Sysno};
 
-const MAX_ADDR: usize = 2usize.pow(20);
+const MAX_ADDR: usize = 1 << 24;
 
 pub struct CPU {
     pub pc: i64,
@@ -22,23 +22,68 @@ impl CPU {
 
     pub fn step(&mut self) -> Result<(), Error> {
         let raw = self.memory.load_u32(self.pc as usize);
-        let (inst, size) = parse_instruction(raw)?;
-        execute_instruction(self, inst, size as i64);
+        let (inst, size) = Inst::parse(raw)?;
+        inst.exec(size as i64, self);
         Ok(())
     }
 
     pub fn get_reg(&self, reg: Reg) -> u64 {
-        if reg == REG_ZR {
-            0x0
-        } else {
-            self.regs[reg as usize]
-        }
+        self.regs[reg as usize]
     }
 
     pub fn set_reg(&mut self, reg: Reg, val: u64) {
         if reg != REG_ZR {
             self.regs[reg as usize] = val;
         }
+    }
+
+    pub unsafe fn ecall(&mut self) {
+        const RISCV_SYSNO_CLOSE:    u64 = 57;
+        const RISCV_SYSNO_READ:     u64 = 63;
+        const RISCV_SYSNO_WRITE:    u64 = 64;
+        const RISCV_SYSNO_NEWFSTAT: u64 = 80;
+        const RISCV_SYSNO_EXIT:     u64 = 93;
+        const RISCV_SYSNO_BRK:      u64 = 214;
+        const RISCV_SYSNO_OPEN:     u64 = 430;
+
+        let a0 = self.get_reg(REG_A0) as usize;
+        let a1 = self.get_reg(REG_A1) as usize;
+        let a2 = self.get_reg(REG_A2) as usize;
+
+        // Linux Syscall Numbers, for whatever reason, are different on different architectures.
+        // See https://jborza.com/post/2021-05-11-riscv-linux-syscalls/. Let's hope at least
+        // the arguments are the same and that the rust crate `syscalls` are those of the host.
+        let syscall = self.get_reg(REG_A7);
+        let res = match syscall {
+            RISCV_SYSNO_CLOSE => syscall!(Sysno::close, a0),
+            RISCV_SYSNO_READ => {
+                let addr = self.memory.data.as_ptr().add(a1);
+                syscall!(Sysno::read, a0, addr as usize, a2)
+            },
+            RISCV_SYSNO_WRITE => {
+                let addr = self.memory.data.as_ptr().add(a1);
+                syscall!(Sysno::write, a0, addr as usize, a2)
+            },
+            RISCV_SYSNO_NEWFSTAT => {
+                let addr = self.memory.data.as_ptr().add(a1);
+                syscall!(Sysno::newfstatat, a0, addr as usize)
+            },
+            RISCV_SYSNO_EXIT => syscall!(Sysno::exit, a0),
+            RISCV_SYSNO_BRK => {
+                eprintln!("[simrv64i]: VM did syscall `BRK` (ignored)");
+                Ok(0)
+            },
+            RISCV_SYSNO_OPEN => {
+                let filepath = self.memory.data.as_ptr().add(a0);
+                syscall!(Sysno::open, filepath as usize, a1)
+            },
+            _ => todo!()
+        };
+
+        self.set_reg(REG_A0, match res {
+            Ok(val) => val as u64,
+            Err(errno) => -(errno.into_raw() as i64) as u64
+        });
     }
 }
 
@@ -107,61 +152,4 @@ impl Memory {
         self.data[addr + 7] = ((val >> 56) & 0xff) as u8;
     }
 }
-
-const RISCV_SYSNO_OPEN:  u64 = 430;
-const RISCV_SYSNO_READ:  u64 = 63;
-const RISCV_SYSNO_WRITE: u64 = 64;
-const RISCV_SYSNO_CLOSE: u64 = 57;
-const RISCV_SYSNO_EXIT:  u64 = 93;
-
-pub unsafe fn ecall(cpu: &mut CPU) {
-    const A0: Reg = 10;
-    const A1: Reg = 11;
-    const A2: Reg = 12;
-    const _A3: Reg = 13;
-    const _A4: Reg = 14;
-    const _A5: Reg = 15;
-    const _A6: Reg = 16;
-    const A7: Reg = 17;
-
-
-    // Linux Syscall Numbers, for whatever reason, are different on different architectures.
-    // See https://jborza.com/post/2021-05-11-riscv-linux-syscalls/. Let's hope at least
-    // the arguments are the same and that the rust crate `syscalls` are those of the host.
-    let syscall = cpu.get_reg(A7);
-    let res = match syscall {
-        RISCV_SYSNO_OPEN => {
-            let filepath = cpu.memory.data.as_ptr().add(cpu.get_reg(A0) as usize);
-            let flags = cpu.get_reg(A1);
-            syscall!(Sysno::open, filepath as usize, flags)
-        },
-        RISCV_SYSNO_READ => {
-            let fd = cpu.get_reg(A0) as usize;
-            let count = cpu.get_reg(A2) as usize;
-            let addr = cpu.memory.data.as_ptr().add(cpu.get_reg(A1) as usize);
-            syscall!(Sysno::read, fd, addr as usize, count)
-        },
-        RISCV_SYSNO_WRITE => {
-            let fd = cpu.get_reg(A0) as usize;
-            let count = cpu.get_reg(A2) as usize;
-            let addr = cpu.memory.data.as_ptr().add(cpu.get_reg(A1) as usize);
-            syscall!(Sysno::write, fd, addr as usize, count)
-        },
-        RISCV_SYSNO_CLOSE => {
-            let fd = cpu.get_reg(A0) as usize;
-            syscall!(Sysno::close, fd)
-        },
-        RISCV_SYSNO_EXIT => {
-            let status = cpu.get_reg(A0) as usize;
-            syscall!(Sysno::exit, status)
-        },
-        _ => todo!()
-    };
-
-    cpu.set_reg(A0, match res {
-        Ok(val) => val as u64,
-        Err(errno) => -(errno.into_raw() as i64) as u64
-    });
-}
-
 

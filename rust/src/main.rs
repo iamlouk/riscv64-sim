@@ -1,14 +1,13 @@
 mod insts;
 mod cpu;
 mod dbg;
+mod syms;
 
 use std::io::Write;
 
 use elf;
 use clap::{self, Parser};
-use insts::{Inst, parse_instruction};
-
-use crate::insts::REG_X2;
+use crate::insts::{Inst, REG_SP};
 
 #[derive(clap::Parser)]
 #[command(author, version, about)]
@@ -20,10 +19,13 @@ struct Args {
     dump: bool,
 
     #[arg(short, long)]
-    exec: bool
+    exec: bool,
+
+    #[arg(short, long)]
+    verbose: bool
 }
 
-fn execute(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
+fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
     let mut cpu = cpu::CPU::new();
     cpu.pc = elf_file.ehdr.e_entry as i64;
 
@@ -47,13 +49,31 @@ fn execute(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
 
     eprintln!("[simrv64i]: PC = {:#08x}", cpu.pc);
     for section in sections {
-        if section.sh_type != elf::abi::SHT_PROGBITS || section.sh_size == 0 {
+        // TODO: There must be a better way of knowing if this section is important...!
+        let name = string_table.get(section.sh_name as usize).unwrap_or("<unnamed>");
+        let skip = match name {
+            ".rela.dyn" => false,
+            ".text" => false,
+            ".rodata" => false, ".data.rel.ro" => false,
+            ".data" => false, ".sdata" => false, ".tdata" => false,
+            ".eh_frame" => false, ".gcc_except_table" => false,
+            ".init_array" => false, ".fini_array" => false, ".preinit_array" => false,
+            "__libc_freeres_fn" => false,
+            "__libc_subfreeres" => false,
+            "__libc_IO_vtables" => false,
+            "__libc_atexit" => false,
+            ".got" => false,
+            "__libc_freeres_ptrs" => false,
+            _ => true
+        };
+
+
+        eprintln!("[simrv64i]:{} {:#08x} - {:#08x}: section {:?} ({} bytes)",
+            if skip { " skipped:" } else { "" },
+            section.sh_addr, section.sh_addr + section.sh_size, name, section.sh_size);
+        if skip {
             continue;
         }
-
-        let name = string_table.get(section.sh_name as usize).unwrap_or("<unnamed>");
-        eprintln!("[simrv64i]: {:#08x} - {:#08x}: section {:?} ({} bytes)",
-            section.sh_addr, section.sh_addr + section.sh_size, name, section.sh_size);
 
         let bytes = match elf_file.section_data(&section) {
             Ok((data, None)) => data,
@@ -75,18 +95,36 @@ fn execute(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
         cpu.memory.copy_bulk(section.sh_addr, bytes);
     }
 
-    let top_of_stack = 0xffffffu64;
-    cpu.set_reg(REG_X2, top_of_stack);
+
+    let symbols = syms::get_symbols(&elf_file);
+
+    let top_of_stack = 0x10000u64;
+    cpu.set_reg(REG_SP, top_of_stack);
 
     eprintln!("[simrv64i]: starting VM...");
+    let mut stdout = std::io::stdout().lock();
     loop {
-        match cpu.step() {
-            Ok(_) => continue,
+        let raw = cpu.memory.load_u32(cpu.pc as usize);
+        let (inst, inst_size) = match Inst::parse(raw) {
+            Ok((inst, inst_size)) => (inst, inst_size as i64),
             Err(e) => {
-                eprintln!("[simrv64i]: failed to execute instruction (at PC={:?}): {:?}",
+                eprintln!("[simrv64i]: failed to execute instruction (at PC={:08x}): {:?}",
                           cpu.pc, e);
                 std::process::exit(1);
             }
+        };
+
+        let old_pc = cpu.pc;
+        if args.verbose {
+            write!(&mut stdout, "[{:8x}]:\t", cpu.pc).unwrap();
+            inst.print(&mut stdout, cpu.pc).unwrap();
+            write!(&mut stdout, "\n").unwrap();
+        }
+        inst.exec(inst_size, &mut cpu);
+        if args.verbose && cpu.pc != old_pc + inst_size {
+            let (name, symaddr) = syms::get_symbol(&symbols, cpu.pc as u64).unwrap_or(("???", 0));
+            write!(&mut stdout, "[simrv64i]: {} + {:#x}\n",
+                   name, cpu.pc as u64 - symaddr).unwrap();
         }
     }
 }
@@ -126,7 +164,7 @@ fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Ve
             ((bytes[offset + 1] as u32) <<  8) |
             ((bytes[offset + 2] as u32) << 16) |
             ((bytes[offset + 3] as u32) << 24);
-        let (inst, size) = match parse_instruction(raw) {
+        let (inst, size) = match Inst::parse(raw) {
             Ok(res) => res,
             Err(_) => {
                 // eprintln!("[simrv64i]: failed to parse instruction: {:?}", e);
@@ -145,21 +183,20 @@ fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Ve
             let raw =
                 ((bytes[offset + 0] as u32) << 0) |
                 ((bytes[offset + 1] as u32) << 8);
-            write!(&mut stdout, "{:8x}:\t{:04x}        ", addr, raw)?;
+            write!(&mut stdout, "{:8x}:\t{:04x}     \t", addr, raw)?;
         } else if size == 4 {
             let raw =
                 ((bytes[offset + 0] as u32) << 0) |
                 ((bytes[offset + 1] as u32) << 8) |
                 ((bytes[offset + 2] as u32) << 16) |
                 ((bytes[offset + 3] as u32) << 24);
-            write!(&mut stdout, "{:8x}:\t{:08x}    ", addr, raw)?;
+            write!(&mut stdout, "{:8x}:\t{:08x} \t", addr, raw)?;
         } else {
             panic!()
         }
 
         inst.print(&mut stdout, addr as i64)?;
         write!(&mut stdout, "\n")?;
-        // stdout.flush().expect("stdout flush failed");
         offset += size;
     }
 
@@ -200,7 +237,7 @@ fn main() {
     }
 
     if args.exec {
-        execute(elf_file, &raw_file);
+        execute(&args, elf_file, &raw_file);
         return;
     }
 }
