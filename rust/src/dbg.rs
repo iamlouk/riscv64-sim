@@ -1,3 +1,5 @@
+use std::fs::write;
+
 use crate::insts::*;
 
 fn reg_abi_name(reg: Reg) -> &'static str {
@@ -14,6 +16,22 @@ fn reg_abi_name(reg: Reg) -> &'static str {
          _ => panic!("RISC-V only has 32 registers")
     }
 }
+
+fn freg_abi_name(reg: FReg) -> &'static str {
+    match reg {
+         0 => "f0",
+         1 => "f1",   2 => "f2",   3 => "f3",   4 => "f4",
+         5 => "f5",   6 => "f6",   7 => "f7",   8 => "f8",
+         9 => "f9",  10 => "f10", 11 => "f11", 12 => "f12",
+        13 => "f13", 14 => "f14", 15 => "f15", 16 => "f16",
+        17 => "f17", 18 => "f18", 19 => "f19", 20 => "f20",
+        21 => "f21", 22 => "f22", 23 => "f23", 24 => "f24",
+        25 => "f25", 26 => "f26", 27 => "f27", 28 => "f28",
+        29 => "f29", 30 => "f30", 31 => "f31",
+         _ => panic!("RISC-V only has 32 registers")
+    }
+}
+
 
 impl Inst {
     pub fn print<W: std::io::Write>(&self, w: &mut W, address: i64) -> std::io::Result<()> {
@@ -145,7 +163,20 @@ impl Inst {
                     reg_abi_name(src1), imm as i32),
 
             Inst::Unknown =>
-                write!(w, "???")
+                write!(w, "???"),
+
+            Inst::LoadFP { dst, width: 4, base, offset } =>
+                write!(w, "flw\t{},{}({})", freg_abi_name(dst), offset, reg_abi_name(base)),
+            Inst::LoadFP { dst, width: 8, base, offset } =>
+                write!(w, "fld\t{},{}({})", freg_abi_name(dst), offset, reg_abi_name(base)),
+            Inst::LoadFP { .. } => panic!(),
+            Inst::StoreFP { src, width: 4, base, offset } =>
+                write!(w, "fsw\t{},{}({})", freg_abi_name(src), offset, reg_abi_name(base)),
+            Inst::StoreFP { src, width: 8, base, offset } =>
+                write!(w, "fsd\t{},{}({})", freg_abi_name(src), offset, reg_abi_name(base)),
+            Inst::StoreFP { .. } => panic!(),
+
+            _ => todo!()
         }
     }
 }

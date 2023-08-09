@@ -62,11 +62,13 @@ pub enum Inst {
     LoadFP { dst: FReg, width: u8, base: Reg, offset: i32 },
     StoreFP { src: FReg, width: u8, base: Reg, offset: i32 },
     FComp { op: FPU, dst: FReg, src1: FReg, dst2: FReg, rm: RoundingMode, width: u8 },
+    // 4 fucking opcodes from the first 7 bits just for this (SVE did it better here...)...
     FMADD { dst: FReg, src1: FReg, src2: FReg, src3: FReg,
             rm: RoundingMode, width: u8, negate: bool },
     FMSUB { dst: FReg, src1: FReg, src2: FReg, src3: FReg,
             rm: RoundingMode, width: u8, negate: bool },
-    // TODO...
+    // TODO: The only relevant instruction for just now are the load/store
+    // ones in order to make a rv64g libc printf work.
 }
 
 #[derive(Debug)]
@@ -92,7 +94,13 @@ fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
                   ((raw & 0b0000011110000000) >> ( 7 - 6)) |
                   ((raw & 0b0001100000000000) >> (11 - 4))) as u32
         },
-        (0b001, 0b00) => return Err(Error::Unimplemented("C.FLD")),
+        (0b001, 0b00) => Inst::LoadFP {
+            dst: get_reg3_bits432(raw), width: 8,
+            base: get_reg3_bits987(raw),
+            offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
+                     ((raw & 0b0000000001100000) << ( 6 - 5))) as i32,
+
+        },
         (0b010, 0b00) => Inst::Load {
             dst: get_reg3_bits432(raw), width: 4, base: get_reg3_bits987(raw),
             offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
@@ -107,7 +115,12 @@ fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
             signext: true
         },
         (0b100, 0b00) => return Err(Error::InvalidEncoding("C extension reserved space")),
-        (0b101, 0b00) => return Err(Error::Unimplemented("C.FSD")),
+        (0b101, 0b00) => Inst::StoreFP {
+            src: get_reg3_bits432(raw), width: 8,
+            base: get_reg3_bits987(raw),
+            offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
+                     ((raw & 0b0000000001100000) << ( 6 - 5))) as i32
+        },
         (0b110, 0b00) => Inst::Store {
             src: get_reg3_bits432(raw), width: 4, base: get_reg3_bits987(raw),
             offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
@@ -249,7 +262,13 @@ fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
             imm: (((raw & 0b0001000000000000) >> (12 - 5)) |
                   ((raw & 0b0000000001111100) >> ( 2 - 0))) as u32
         },
-        (0b001, 0b10) => return Err(Error::Unimplemented("C.FLDSP")),
+        (0b001, 0b10) => Inst::LoadFP {
+            dst: get_reg5_bits1110987(raw),
+            width: 8, base: REG_SP,
+            offset: (((raw & 0b0001000000000000) >> (12 - 5)) |
+                     ((raw & 0b0000000001100000) >> ( 5 - 3)) |
+                     ((raw & 0b0000000000011100) << ( 8 - 4))) as i32
+        },
         (0b010, 0b10) => Inst::Load {
             dst: get_reg5_bits1110987(raw),
             width: 4, base: REG_SP,
@@ -282,7 +301,11 @@ fn parse_compressed_instruction(raw: u16) -> Result<Inst, Error> {
             },
             _ => return Err(Error::InvalidEncoding("C extension reserved space"))
         },
-        (0b101, 0b10) => return Err(Error::Unimplemented("C.FSDSP")),
+        (0b101, 0b10) => Inst::StoreFP {
+            src: ((raw >> 2) & 0x1f) as Reg, width: 8, base: REG_SP,
+            offset: (((raw & 0b0001110000000000) >> (10 - 3)) |
+                     ((raw & 0b0000001110000000) >> ( 7 - 6))) as i32
+        },
         (0b110, 0b10) => Inst::Store {
             src: ((raw >> 2) & 0x1f) as Reg, width: 4, base: REG_SP,
             offset: (((raw & 0b0001111000000000) >> (9 - 2)) |
@@ -514,7 +537,11 @@ fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
 }
 
 fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
-    match inst.clone() {
+    fn calc_address(cpu: &cpu::CPU, base: Reg, offset: i32) -> usize {
+        (cpu.get_reg(base) as i64 + offset as i64) as usize
+    }
+
+    match inst {
         Inst::LoadUpperImmediate { dst, imm } => {
             cpu.set_reg(dst, imm as i32 as i64 as u64);
         },
@@ -550,7 +577,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
             }
         },
         Inst::Load { dst, width, base, offset, signext: false } => {
-            let addr = ((cpu.get_reg(base) as i64) + offset as i64) as usize;
+            let addr = calc_address(cpu, base, offset);
             cpu.set_reg(dst, match width {
                 1 => cpu.memory.load_u8(addr)  as u64,
                 2 => cpu.memory.load_u16(addr) as u64,
@@ -560,7 +587,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
             });
         },
         Inst::Load { dst, width, base, offset, signext: true } => {
-            let addr = ((cpu.get_reg(base) as i64) + offset as i64) as usize;
+            let addr = calc_address(cpu, base, offset);
             cpu.set_reg(dst, match width {
                 1 => cpu.memory.load_u8(addr) as i8 as i64 as u64,
                 2 => cpu.memory.load_u16(addr) as i16 as i64 as u64,
@@ -570,7 +597,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
             });
         },
         Inst::Store { src, width, base, offset } => {
-            let addr = (cpu.get_reg(base) as i64 + offset as i64) as usize;
+            let addr = calc_address(cpu, base, offset);
             let val = cpu.get_reg(src);
             match width {
                 1 => cpu.memory.store_u8(addr, val as u8),
@@ -638,6 +665,26 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
             })
         },
         Inst::ECall { _priv } => unsafe { cpu.ecall(); },
+
+        Inst::LoadFP { dst, width: 4, base, offset } => {
+            let addr = calc_address(cpu, base, offset);
+            cpu.set_freg_f32(dst, f32::from_bits(cpu.memory.load_u32(addr)));
+        },
+        Inst::LoadFP { dst, width: 8, base, offset } => {
+            let addr = calc_address(cpu, base, offset);
+            cpu.set_freg_f64(dst, f64::from_bits(cpu.memory.load_u64(addr)));
+        },
+        Inst::StoreFP { src, width: 4, base, offset } => {
+            let addr = calc_address(cpu, base, offset);
+            let val = cpu.get_freg_f32(src);
+            cpu.memory.store_u32(addr, val.to_bits());
+        },
+        Inst::StoreFP { src, width: 8, base, offset } => {
+            let addr = calc_address(cpu, base, offset);
+            let val = cpu.get_freg_f64(src);
+            cpu.memory.store_u64(addr, val.to_bits());
+        },
+
         _ => unimplemented!()
     };
     cpu.pc += inst_size;
