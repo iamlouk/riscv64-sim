@@ -1,6 +1,7 @@
 use crate::cpu;
 
 pub type Reg = u8;
+pub type FReg = u8;
 pub const REG_ZR: Reg = 0;
 pub const REG_RA: Reg = 1;
 pub const REG_SP: Reg = 2;
@@ -31,6 +32,16 @@ pub enum ALU {
     Rem, RemW, RemU, RemUW
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum FPU {
+    Add, Sub, Mul, Div, Min, Max, Sqrt
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RoundingMode {
+    RNE, RTZ, RDN, RUP, RMM
+}
+
 #[derive(Debug, Clone)]
 pub enum Inst {
     Unknown,
@@ -45,7 +56,17 @@ pub enum Inst {
     ALUImm { op: ALU, dst: Reg, src1: Reg, imm: u32 },
     ALUReg { op: ALU, dst: Reg, src1: Reg, src2: Reg },
     LoadUpperImmediate { dst: Reg, imm: u32 },
-    AddUpperImmediateToPC { dst: Reg, imm: u32 }
+    AddUpperImmediateToPC { dst: Reg, imm: u32 },
+
+    // "F" and "D" extension instructions:
+    LoadFP { dst: FReg, width: u8, base: Reg, offset: i32 },
+    StoreFP { src: FReg, width: u8, base: Reg, offset: i32 },
+    FComp { op: FPU, dst: FReg, src1: FReg, dst2: FReg, rm: RoundingMode, width: u8 },
+    FMADD { dst: FReg, src1: FReg, src2: FReg, src3: FReg,
+            rm: RoundingMode, width: u8, negate: bool },
+    FMSUB { dst: FReg, src1: FReg, src2: FReg, src3: FReg,
+            rm: RoundingMode, width: u8, negate: bool },
+    // TODO...
 }
 
 #[derive(Debug)]

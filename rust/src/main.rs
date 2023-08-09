@@ -47,7 +47,6 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
         }
     };
 
-    eprintln!("[simrv64i]: PC = {:#08x}", cpu.pc);
     for section in sections {
         // TODO: There must be a better way of knowing if this section is important...!
         let name = string_table.get(section.sh_name as usize).unwrap_or("<unnamed>");
@@ -97,9 +96,16 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
 
 
     let symbols = syms::get_symbols(&elf_file);
+    let symbol_tree = syms::SymbolTreeNode::build(&symbols).unwrap();
+    eprintln!("[simrv64i]: start-pc={:#08x}, number-of-symbols: {}", cpu.pc, symbol_tree.count());
 
     let top_of_stack = 0x10000u64;
     cpu.set_reg(REG_SP, top_of_stack);
+
+    let mut call_stack: Vec<&str> = vec![];
+    if let Some((name, _)) = symbol_tree.lookup(cpu.pc as u64) {
+        call_stack.push(name);
+    }
 
     eprintln!("[simrv64i]: starting VM...");
     let mut stdout = std::io::stdout().lock();
@@ -122,9 +128,20 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
         }
         inst.exec(inst_size, &mut cpu);
         if args.verbose && cpu.pc != old_pc + inst_size {
-            let (name, symaddr) = syms::get_symbol(&symbols, cpu.pc as u64).unwrap_or(("???", 0));
+            if inst.is_ret() && call_stack.len() > 0 {
+                call_stack.pop();
+            }
+
+            // let (name, start) = syms::get_symbol(&symbols, cpu.pc as u64).unwrap_or(("???", 0));
+            let (name, start) = symbol_tree.lookup(cpu.pc as u64).unwrap_or(("???", 0));
+            if inst.is_call() {
+                call_stack.push(name);
+            }
             write!(&mut stdout, "[simrv64i]: {} + {:#x}\n",
-                   name, cpu.pc as u64 - symaddr).unwrap();
+                   name, cpu.pc as u64 - start).unwrap();
+            if (inst.is_call() && start == cpu.pc as u64) || inst.is_ret() {
+                write!(&mut stdout, "[simrv64i]: call-stack: {:?}\n", call_stack).unwrap();
+            }
         }
     }
 }
@@ -167,10 +184,6 @@ fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Ve
         let (inst, size) = match Inst::parse(raw) {
             Ok(res) => res,
             Err(_) => {
-                // eprintln!("[simrv64i]: failed to parse instruction: {:?}", e);
-                // eprintln!("            binary: {:032b} as address {:#x}", raw, addr);
-                // std::process::exit(1);
-
                 if (bytes[offset] & 0b11) == 0b11 {
                     (Inst::Unknown, 4)
                 } else {

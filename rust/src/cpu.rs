@@ -6,6 +6,7 @@ const MAX_ADDR: usize = 1 << 24;
 pub struct CPU {
     pub pc: i64,
     pub regs: [u64; 32],
+    pub fregs: [u64; 32],
     pub memory: Memory
 }
 
@@ -14,17 +15,11 @@ impl CPU {
         CPU {
             pc: 0,
             regs: [0x0; 32],
+            fregs: [0xffffffffffffffff; 32],
             memory: Memory {
                 data: Box::new([0x0; MAX_ADDR])
             }
         }
-    }
-
-    pub fn step(&mut self) -> Result<(), Error> {
-        let raw = self.memory.load_u32(self.pc as usize);
-        let (inst, size) = Inst::parse(raw)?;
-        inst.exec(size as i64, self);
-        Ok(())
     }
 
     pub fn get_reg(&self, reg: Reg) -> u64 {
@@ -36,6 +31,23 @@ impl CPU {
             self.regs[reg as usize] = val;
         }
     }
+
+    pub fn get_freg_f32(&self, reg: FReg) -> f32 {
+        f32::from_bits(self.fregs[reg as usize] as u32)
+    }
+
+    pub fn get_freg_f64(&self, reg: FReg) -> f64 {
+        f64::from_bits(self.fregs[reg as usize])
+    }
+
+    pub fn set_freg_f32(&mut self, reg: FReg, val: f32) {
+        self.fregs[reg as usize] = 0xffffffff00000000 | (val.to_bits() as u64);
+    }
+
+    pub fn set_freg_f64(&mut self, reg: FReg, val: f64) {
+        self.fregs[reg as usize] = val.to_bits();
+    }
+
 
     pub unsafe fn ecall(&mut self) {
         const RISCV_SYSNO_CLOSE:    u64 = 57;
