@@ -32,11 +32,13 @@ pub enum ALU {
     Rem, RemW, RemU, RemUW
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum FPU {
     Add, Sub, Mul, Div, Min, Max, Sqrt
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum RoundingMode {
     RNE, RTZ, RDN, RUP, RMM
@@ -61,10 +63,14 @@ pub enum Inst {
     // "F" and "D" extension instructions:
     LoadFP { dst: FReg, width: u8, base: Reg, offset: i32 },
     StoreFP { src: FReg, width: u8, base: Reg, offset: i32 },
+
+    #[allow(dead_code)]
     FComp { op: FPU, dst: FReg, src1: FReg, dst2: FReg, rm: RoundingMode, width: u8 },
     // 4 fucking opcodes from the first 7 bits just for this (SVE did it better here...)...
+    #[allow(dead_code)]
     FMADD { dst: FReg, src1: FReg, src2: FReg, src3: FReg,
             rm: RoundingMode, width: u8, negate: bool },
+    #[allow(dead_code)]
     FMSUB { dst: FReg, src1: FReg, src2: FReg, src3: FReg,
             rm: RoundingMode, width: u8, negate: bool },
     // TODO: The only relevant instruction for just now are the load/store
@@ -697,6 +703,22 @@ impl Inst {
 
     pub fn exec(&self, inst_size: i64, cpu: &mut cpu::CPU) {
         execute_instruction(cpu, self.clone(), inst_size)
+    }
+
+    pub fn is_terminator(&self) -> bool {
+        match self {
+            Inst::JumpAndLink { .. } => true,
+            Inst::JumpAndLinkReg { .. } => true,
+            Inst::Branch { .. } => true,
+            Inst::ECall { .. } => true,
+            Inst::EBreak { .. } => true,
+
+            // AUIPC is a terminator for internal JIT reasons:
+            // It reads the PC, and that means the prev. PC
+            // has to be written back beforehand.
+            Inst::AddUpperImmediateToPC { .. } => true,
+            _ => false
+        }
     }
 
     pub fn is_call(&self) -> bool {

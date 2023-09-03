@@ -1,8 +1,15 @@
+use std::cell::RefCell;
+use std::ops::AddAssign;
+use std::pin::Pin;
+
 use crate::insts::*;
+use crate::syms;
+use crate::tbs::*;
 use syscalls::{syscall, Sysno};
 
 const MAX_ADDR: usize = 1 << 24;
 
+#[repr(C)]
 pub struct CPU {
     pub pc: i64,
     pub regs: [u64; 32],
@@ -18,8 +25,54 @@ impl CPU {
             fregs: [0xffffffffffffffff; 32],
             memory: Memory {
                 data: Box::new([0x0; MAX_ADDR])
+            },
+        }
+    }
+
+    pub fn step(&mut self, jit: &mut JIT, syms: &syms::SymbolTreeNode) -> Result<u64, Error> {
+        if let Some(tb) = jit.tbs.get(&self.pc) {
+            tb.exec_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // print!("[simrv64i] re-running TB at {:#08x}, count: {}\n", self.pc, *tb.exec_count.borrow());
+            for (inst, size) in &tb.instrs {
+                inst.exec(*size as i64, self);
+            }
+            return Ok(self.pc as u64)
+        }
+
+        jit.buffer.clear();
+        let start_pc = self.pc as u64;
+        let mut tb_size = 0;
+        loop {
+            let raw = self.memory.load_u32(self.pc as usize + tb_size);
+            let (instr, size) = Inst::parse(raw)?;
+            tb_size += size;
+            let ends_tb = instr.is_terminator();
+            jit.buffer.push((instr, size as u8));
+            if ends_tb {
+                break;
             }
         }
+
+        let tb = TranslationBlock {
+            start: start_pc,
+            size: tb_size as u64,
+            exec_count: std::sync::atomic::AtomicI64::new(1),
+            valid: true,
+            instrs: jit.buffer.clone(),
+            label: syms
+                .lookup(start_pc)
+                .filter(|(_, start)| *start == start_pc)
+                .map(|(name, _)| name.to_owned()),
+        };
+
+        for (inst, size) in &tb.instrs {
+            inst.exec(*size as i64, self);
+        }
+
+        // print!("[simrv64i] new TB at {:#08x}, instrs: {}, size: {}\n", start_pc, tb.instrs.len(),  tb.size);
+        jit.tbs.insert(start_pc as i64, tb);
+
+        Ok(start_pc)
     }
 
     pub fn get_reg(&self, reg: Reg) -> u64 {
@@ -30,6 +83,19 @@ impl CPU {
         if reg != REG_ZR {
             self.regs[reg as usize] = val;
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn get_reg_address(self: Pin<&Self>, reg: Reg) -> *const u64 {
+        let reg_ref: &u64 = &self.regs[reg as usize];
+        reg_ref as *const u64
+    }
+
+    #[allow(dead_code)]
+    pub fn get_reg_offset(self: Pin<&Self>, reg: Reg) -> usize {
+        let first_reg_addr = &self.regs[0] as *const u64 as usize;
+        let reg_addr = &self.regs[reg as usize] as *const u64 as usize;
+        return reg_addr - first_reg_addr
     }
 
     pub fn get_freg_f32(&self, reg: FReg) -> f32 {
@@ -47,7 +113,6 @@ impl CPU {
     pub fn set_freg_f64(&mut self, reg: FReg, val: f64) {
         self.fregs[reg as usize] = val.to_bits();
     }
-
 
     pub unsafe fn ecall(&mut self) {
         const RISCV_SYSNO_CLOSE:    u64 = 57;

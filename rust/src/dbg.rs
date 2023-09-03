@@ -1,5 +1,3 @@
-use std::fs::write;
-
 use crate::insts::*;
 
 fn reg_abi_name(reg: Reg) -> &'static str {

@@ -4,7 +4,7 @@ This repository contains two simulators, a old one in C at the root, and a new o
 
 ### User-Space RISC-V Simulator in Rust
 
-The Rust version can be found [here](./rust). It works a bit like user-mode QEMU: It simulates a user-space RISC-V binary (currently `rv64im`), and when the executable makes a `ecall`, it translates the syscall number from the RISC-V version to the host version and let's the host kernel execute the syscall. *This only works on Linux*.
+The Rust version can be found [here](./rust). It works a bit like user-mode QEMU: It simulates a user-space RISC-V binary (currently `rv64cim`), and when the executable makes a `ecall`, it translates the syscall number from the RISC-V version to the host version and let's the host kernel execute the syscall. *This only works on Linux*.
 
 ```
 cd ./rust

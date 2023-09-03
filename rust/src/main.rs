@@ -2,6 +2,7 @@ mod insts;
 mod cpu;
 mod dbg;
 mod syms;
+mod tbs;
 
 use std::io::Write;
 
@@ -22,7 +23,10 @@ struct Args {
     exec: bool,
 
     #[arg(short, long)]
-    verbose: bool
+    verbose: bool,
+
+    #[arg(short, long)]
+    jit: bool
 }
 
 fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
@@ -67,9 +71,11 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
         };
 
 
-        eprintln!("[simrv64i]:{} {:#08x} - {:#08x}: section {:?} ({} bytes)",
-            if skip { " skipped:" } else { "" },
-            section.sh_addr, section.sh_addr + section.sh_size, name, section.sh_size);
+        if args.verbose {
+            eprintln!("[simrv64i]:{} {:#08x} - {:#08x}: section {:?} ({} bytes)",
+                if skip { " skipped:" } else { "" },
+                section.sh_addr, section.sh_addr + section.sh_size, name, section.sh_size);
+        }
         if skip {
             continue;
         }
@@ -94,7 +100,6 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
         cpu.memory.copy_bulk(section.sh_addr, bytes);
     }
 
-
     let symbols = syms::get_symbols(&elf_file);
     let symbol_tree = syms::SymbolTreeNode::build(&symbols).unwrap();
     eprintln!("[simrv64i]: start-pc={:#08x}, number-of-symbols: {}", cpu.pc, symbol_tree.count());
@@ -107,7 +112,22 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
         call_stack.push(name);
     }
 
-    eprintln!("[simrv64i]: starting VM...");
+    let mut jit = tbs::JIT::new();
+    if args.jit {
+        loop {
+            match cpu.step(&mut jit, &symbol_tree) {
+                Ok(_) => continue,
+                Err(e) => {
+                    eprintln!("[simrv64i]: at PC={:08x}: {:?}", cpu.pc, e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
+    if args.verbose {
+        eprintln!("[simrv64i]: starting VM...");
+    }
     let mut stdout = std::io::stdout().lock();
     loop {
         let raw = cpu.memory.load_u32(cpu.pc as usize);
