@@ -10,7 +10,7 @@ mod tbs;
 use std::io::Write;
 
 use clap::{self, Parser};
-use crate::insts::{Inst, REG_SP};
+use crate::insts::Inst;
 
 #[derive(clap::Parser)]
 #[command(author, version, about)]
@@ -32,162 +32,41 @@ struct Args {
 }
 
 fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
+    let _ = args;
     let mut cpu = cpu::CPU::new();
-    cpu.pc = elf_file.ehdr.e_entry as i64;
-
-    let (sections, string_table) = match elf_file.section_headers_with_strtab() {
-        Ok((sections, string_table)) => match (sections, string_table) {
-            (Some(sections), Some(string_table)) => (sections, string_table),
-            (None, _) => {
-                eprintln!("[simrv64i]: no section headers");
-                std::process::exit(1);
-            },
-            (_, None) => {
-                eprintln!("[simrv64i]: no section headers");
-                std::process::exit(1);
-            }
+    match cpu.load_and_exec(elf_file) {
+        Ok(exitcode) => {
+            std::process::exit(exitcode);
         },
         Err(e) => {
-            eprintln!("[simrv64i]: failed to parse headers and string table: {}", e);
+            eprintln!("[simrv64i]: error: {:?}", e);
             std::process::exit(1);
-        }
-    };
-
-    for section in sections {
-        // TODO: There must be a better way of knowing if this section is important...!
-        // TODO: Read ELF spec and so on?
-        let name = string_table.get(section.sh_name as usize).unwrap_or("<unnamed>");
-        let skip = !matches!(name,
-            ".rela.dyn" | ".text" | ".rodata" | ".data.rel.ro" | ".data" | ".sdata" | ".tdata" |
-            ".eh_frame" | ".gcc_except_table" | ".init_array" | ".fini_array" | ".preinit_array" |
-            "__libc_freeres_fn" | "__libc_subfreeres" | "__libc_IO_vtables" | "__libc_atexit" |
-            ".got" | "__libc_freeres_ptrs");
-
-
-        if args.verbose {
-            eprintln!("[simrv64i]:{} {:#08x} - {:#08x}: section {:?} ({} bytes)",
-                if skip { " skipped:" } else { "" },
-                section.sh_addr, section.sh_addr + section.sh_size, name, section.sh_size);
-        }
-        if skip {
-            continue;
-        }
-
-        let bytes = match elf_file.section_data(&section) {
-            Ok((data, None)) => data,
-            Ok((_, Some(_))) => {
-                eprintln!("[simrv64i]: failed to read section because its compressed");
-                std::process::exit(1);
-            },
-            Err(e) => {
-                eprintln!("[simrv64i]: failed to read section: {:?}", e);
-                std::process::exit(1);
-            }
-        };
-
-        if section.sh_addr + section.sh_size >= cpu.memory.size() {
-            eprintln!("[simrv64i]: VM memory not large enough");
-            std::process::exit(1);
-        }
-
-        cpu.memory.copy_bulk(section.sh_addr, bytes);
-    }
-
-    let symbols = syms::get_symbols(&elf_file);
-    let symbol_tree = syms::SymbolTreeNode::build(&symbols).unwrap();
-    eprintln!("[simrv64i]: start-pc={:#08x}, number-of-symbols: {}", cpu.pc, symbol_tree.count());
-
-    let top_of_stack = 0x10000u64;
-    cpu.set_reg(REG_SP, top_of_stack);
-
-    let mut call_stack: Vec<&str> = vec![];
-    if let Some((name, _)) = symbol_tree.lookup(cpu.pc as u64) {
-        call_stack.push(name);
-    }
-
-    let mut jit = tbs::JIT::new();
-    if args.jit {
-        loop {
-            match cpu.step(&mut jit, &symbol_tree) {
-                Ok(_) => continue,
-                Err(e) => {
-                    eprintln!("[simrv64i]: at PC={:08x}: {:?}", cpu.pc, e);
-                    std::process::exit(1);
-                }
-            }
-        }
-    }
-
-    if args.verbose {
-        eprintln!("[simrv64i]: starting VM...");
-    }
-    let mut stdout = std::io::stdout().lock();
-    loop {
-        let raw = cpu.memory.load_u32(cpu.pc as usize);
-        let (inst, inst_size) = match Inst::parse(raw) {
-            Ok((inst, inst_size)) => (inst, inst_size as i64),
-            Err(e) => {
-                eprintln!("[simrv64i]: failed to execute instruction (at PC={:08x}): {:?}",
-                          cpu.pc, e);
-                std::process::exit(1);
-            }
-        };
-
-        let old_pc = cpu.pc;
-        if args.verbose {
-            write!(&mut stdout, "[{:8x}]:\t", cpu.pc).unwrap();
-            inst.print(&mut stdout, cpu.pc).unwrap();
-            writeln!(&mut stdout).unwrap();
-        }
-        inst.exec(inst_size, &mut cpu);
-        if args.verbose && cpu.pc != old_pc + inst_size {
-            if inst.is_ret() && !call_stack.is_empty() {
-                call_stack.pop();
-            }
-
-            let (name, start) = symbol_tree.lookup(cpu.pc as u64).unwrap_or(("???", 0));
-            if inst.is_call() {
-                call_stack.push(name);
-            }
-            writeln!(&mut stdout, "[simrv64i]: {} + {:#x}",
-                   name, cpu.pc as u64 - start).unwrap();
-            if (inst.is_call() && start == cpu.pc as u64) || inst.is_ret() {
-                writeln!(&mut stdout, "[simrv64i]: call-stack: {:?}", call_stack).unwrap();
-            }
         }
     }
 }
 
 fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>)
         -> std::io::Result<()> {
-    let textsectionhdr = match elf_file.section_header_by_name(".text") {
+    let text_section = match elf_file.section_header_by_name(".text") {
         Ok(Some(hdr)) => hdr,
-        Ok(None) => {
-            eprintln!("[simrv64i]: no '.text' section");
-            std::process::exit(1);
-        },
-        Err(e) => {
-            eprintln!("[simrv64i]: failed to read '.text' section: {:?}", e);
+        Ok(None) | Err(_) => {
+            eprintln!("[simrv64i]: failed to find '.text' section");
             std::process::exit(1);
         }
     };
 
-    let bytes = match elf_file.section_data(&textsectionhdr) {
+    let bytes = match elf_file.section_data(&text_section) {
         Ok((data, None)) => data,
-        Ok((_, Some(_))) => {
-            eprintln!("[simrv64i]: failed to read '.text' section because its compressed");
-            std::process::exit(1);
-        },
-        Err(e) => {
-            eprintln!("[simrv64i]: failed to read '.text' section: {:?}", e);
+        Ok((_, Some(_))) | Err(_) => {
+            eprintln!("[simrv64i]: failed to read '.text' section");
             std::process::exit(1);
         }
     };
 
     let mut stdout = std::io::stdout().lock();
     let mut offset: usize = 0;
-    while offset + 2 < textsectionhdr.sh_size as usize {
-        let addr = textsectionhdr.sh_addr as usize + offset;
+    while offset + 2 < text_section.sh_size as usize {
+        let addr = text_section.sh_addr as usize + offset;
         let raw =
             (bytes[offset] as u32) |
             ((bytes[offset + 1] as u32) <<  8) |
@@ -251,7 +130,8 @@ fn main() {
     if elf_file.ehdr.class != elf::file::Class::ELF64
         || elf_file.ehdr.e_type != elf::abi::ET_EXEC
         || elf_file.ehdr.e_machine != elf::abi::EM_RISCV {
-        eprintln!("[simrv64i]: error processing ELF file {:?}: Not a RV64 executable", &args.file);
+        eprintln!("[simrv64i]: error processing ELF file {:?}: Not a RV64 executable",
+                  &args.file);
         std::process::exit(1);
     }
 
@@ -262,6 +142,37 @@ fn main() {
 
     if args.exec {
         execute(&args, elf_file, &raw_file);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::PathBuf;
+
+    const EXAMPLES: [(&'static str, i32, &'static str); 1] = [
+        ("hello-world.elf", 42, "Hello, World! (argc=0)\n")
+    ];
+
+    #[test]
+    fn examples() {
+        let mut root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        root_dir.push("examples/foo.txt");
+        for (filename, exitcode, expected_stdout) in EXAMPLES {
+            let binary_path = root_dir.with_file_name(filename);
+            let binary_file = std::fs::read(binary_path).unwrap();
+            let elf_file =
+                elf::ElfBytes::<'_, elf::endian::AnyEndian>::minimal_parse(&binary_file).unwrap();
+            assert!(elf_file.ehdr.class == elf::file::Class::ELF64
+                && elf_file.ehdr.e_type == elf::abi::ET_EXEC
+                && elf_file.ehdr.e_machine == elf::abi::EM_RISCV);
+
+            let mut cpu = crate::cpu::CPU::new();
+            let mut raw_stdout: Vec<u8> = Vec::new();
+            cpu.capture_filenos.insert(1, (Some(&mut raw_stdout), None));
+
+            assert_eq!(cpu.load_and_exec(elf_file).unwrap(), exitcode);
+            assert_eq!(expected_stdout.as_bytes(), raw_stdout.as_slice());
+        }
     }
 }
 

@@ -83,8 +83,11 @@ pub enum Inst {
 #[derive(Debug)]
 pub enum Error {
     Illegal,
+    Exit(i32),
     InvalidEncoding(&'static str),
     Unimplemented(&'static str),
+    ELF(String),
+    IO(std::io::Error)
 }
 
 // The C extension really contains some fucked-up encodings:
@@ -545,7 +548,7 @@ fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
     }, 4))
 }
 
-fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
+fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) -> Result<(), Error> {
     fn calc_address(cpu: &cpu::CPU, base: Reg, offset: i32) -> usize {
         (cpu.get_reg(base) as i64 + offset as i64) as usize
     }
@@ -561,13 +564,13 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
         Inst::JumpAndLink { dst, offset } => {
             cpu.set_reg(dst, (cpu.pc + inst_size) as u64);
             cpu.pc += offset as i64;
-            return
+            return Ok(())
         },
         Inst::JumpAndLinkReg { dst, base, offset } => {
             cpu.set_reg(dst, (cpu.pc + inst_size) as u64);
             cpu.pc = (cpu.get_reg(base) as i64) + offset as i64;
             cpu.pc &= !1;
-            return
+            return Ok(())
         },
         Inst::Branch { pred, src1, src2, offset } => {
             let a = cpu.get_reg(src1);
@@ -582,7 +585,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
             };
             if branch {
                 cpu.pc += offset as i64;
-                return
+                return Ok(())
             }
         },
         Inst::Load { dst, width, base, offset, signext: false } => {
@@ -673,8 +676,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
                     panic!("there is no valid encoding for this instruction")
             })
         },
-        Inst::ECall { _priv } => unsafe { cpu.ecall(); },
-
+        Inst::ECall { _priv } => unsafe { cpu.ecall() }?,
         Inst::LoadFP { dst, width: 4, base, offset } => {
             let addr = calc_address(cpu, base, offset);
             cpu.set_freg_f32(dst, f32::from_bits(cpu.memory.load_u32(addr)));
@@ -697,6 +699,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
         _ => unimplemented!()
     };
     cpu.pc += inst_size;
+    Ok(())
 }
 
 impl Inst {
@@ -704,7 +707,7 @@ impl Inst {
         parse_instruction(raw)
     }
 
-    pub fn exec(&self, inst_size: i64, cpu: &mut cpu::CPU) {
+    pub fn exec(&self, inst_size: i64, cpu: &mut cpu::CPU) -> Result<(), Error> {
         execute_instruction(cpu, self.clone(), inst_size)
     }
 
@@ -724,12 +727,14 @@ impl Inst {
         }
     }
 
+    #[allow(unused)]
     pub fn is_call(&self) -> bool {
         matches!(self,
             Inst::JumpAndLink { dst: REG_RA, offset: _ } |
             Inst::JumpAndLinkReg { dst: REG_RA, base: _, offset: _ })
     }
 
+    #[allow(unused)]
     pub fn is_ret(&self) -> bool {
         matches!(self,
             Inst::JumpAndLinkReg { dst: REG_ZR, base: REG_RA, offset: 0 })

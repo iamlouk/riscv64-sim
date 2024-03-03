@@ -6,9 +6,9 @@ int main(int argc, const char *argv[], const char **environ) {
 
 	for (int i = 0; i < argc; i++)
 		printf("argv[%d] = '%s'\n", i, argv[i]);
-	for (int i = 0; environ[i] != NULL; i++)
+	for (int i = 0; environ && environ[i] != NULL; i++)
 		printf("environ[%d] = '%s'\n", i, environ[i]);
 
-	return EXIT_SUCCESS;
+	return 42;
 }
 

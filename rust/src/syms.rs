@@ -68,6 +68,7 @@ impl<'a> SymbolTreeNode<'a> {
         self.right.as_ref().and_then(|node| node.lookup(value))
     }
 
+    #[allow(unused)]
     pub fn count(&self) -> usize {
         1 +
             self.left.as_ref().map(|node| node.count()).unwrap_or(0) +
