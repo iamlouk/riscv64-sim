@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-use std::ops::AddAssign;
 use std::pin::Pin;
 
 use crate::insts::*;
@@ -95,7 +93,7 @@ impl CPU {
     pub fn get_reg_offset(self: Pin<&Self>, reg: Reg) -> usize {
         let first_reg_addr = &self.regs[0] as *const u64 as usize;
         let reg_addr = &self.regs[reg as usize] as *const u64 as usize;
-        return reg_addr - first_reg_addr
+        reg_addr - first_reg_addr
     }
 
     pub fn get_freg_f32(&self, reg: FReg) -> f32 {
@@ -181,25 +179,25 @@ impl Memory {
 
     pub fn load_u16(&self, addr: usize) -> u16 {
         (self.data[addr]) as u16 |
-        ((self.data[addr + 1] as u16) << 8) as u16
+        ((self.data[addr + 1] as u16) << 8)
     }
 
     pub fn load_u32(&self, addr: usize) -> u32 {
         (self.data[addr]) as u32 |
-        ((self.data[addr + 1] as u32) << 8) as u32 |
-        ((self.data[addr + 2] as u32) << 16) as u32 |
-        ((self.data[addr + 3] as u32) << 24) as u32
+        ((self.data[addr + 1] as u32) << 8) |
+        ((self.data[addr + 2] as u32) << 16) |
+        ((self.data[addr + 3] as u32) << 24)
     }
 
     pub fn load_u64(&self, addr: usize) -> u64 {
         (self.data[addr]) as u64 |
-        ((self.data[addr + 1] as u64) << 8) as u64 |
-        ((self.data[addr + 2] as u64) << 16) as u64 |
-        ((self.data[addr + 3] as u64) << 24) as u64 |
-        ((self.data[addr + 4] as u64) << 32) as u64 |
-        ((self.data[addr + 5] as u64) << 40) as u64 |
-        ((self.data[addr + 6] as u64) << 48) as u64 |
-        ((self.data[addr + 7] as u64) << 56) as u64
+        ((self.data[addr + 1] as u64) << 8) |
+        ((self.data[addr + 2] as u64) << 16) |
+        ((self.data[addr + 3] as u64) << 24) |
+        ((self.data[addr + 4] as u64) << 32) |
+        ((self.data[addr + 5] as u64) << 40) |
+        ((self.data[addr + 6] as u64) << 48) |
+        ((self.data[addr + 7] as u64) << 56)
     }
 
     pub fn store_u8(&mut self, addr: usize, val: u8) {

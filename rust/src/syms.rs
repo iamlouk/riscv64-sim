@@ -1,5 +1,3 @@
-use elf;
-
 #[derive(Default, Clone)]
 pub struct Symbol<'a> {
     name: &'a str,
@@ -31,16 +29,6 @@ pub fn get_symbols<'a>(elf_file: &elf::ElfBytes<'a, elf::endian::AnyEndian>) -> 
     symbols
 }
 
-/*
-pub fn get_symbol<'a>(symbols: &Symbols<'a>, vaddr: u64) -> Option<(&'a str, u64)> {
-    // TODO: Build a range tree? Or at least do a binary search?
-    symbols
-        .iter()
-        .find(|sym| sym.addr <= vaddr && vaddr < sym.addr + sym.size)
-        .map(|sym| (sym.name, sym.addr))
-}
-*/
-
 #[derive(Debug, Clone)]
 pub struct SymbolTreeNode<'a> {
     start: u64,
@@ -69,7 +57,7 @@ impl<'a> SymbolTreeNode<'a> {
 
     pub fn lookup(&self, value: u64) -> Option<(&'a str, u64)> {
         if value < self.start {
-            return self.left.as_ref().map(|node| node.lookup(value)).flatten()
+            return self.left.as_ref().and_then(|node| node.lookup(value))
         }
 
         if value < self.start + self.size {
@@ -77,7 +65,7 @@ impl<'a> SymbolTreeNode<'a> {
         }
 
         assert!(self.start + self.size <= value);
-        return self.right.as_ref().map(|node| node.lookup(value)).flatten()
+        self.right.as_ref().and_then(|node| node.lookup(value))
     }
 
     pub fn count(&self) -> usize {

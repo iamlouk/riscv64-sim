@@ -1,3 +1,6 @@
+#![allow(clippy::just_underscores_and_digits)]
+#![allow(clippy::upper_case_acronyms)]
+
 mod insts;
 mod cpu;
 mod dbg;
@@ -6,7 +9,6 @@ mod tbs;
 
 use std::io::Write;
 
-use elf;
 use clap::{self, Parser};
 use crate::insts::{Inst, REG_SP};
 
@@ -53,22 +55,13 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
 
     for section in sections {
         // TODO: There must be a better way of knowing if this section is important...!
+        // TODO: Read ELF spec and so on?
         let name = string_table.get(section.sh_name as usize).unwrap_or("<unnamed>");
-        let skip = match name {
-            ".rela.dyn" => false,
-            ".text" => false,
-            ".rodata" => false, ".data.rel.ro" => false,
-            ".data" => false, ".sdata" => false, ".tdata" => false,
-            ".eh_frame" => false, ".gcc_except_table" => false,
-            ".init_array" => false, ".fini_array" => false, ".preinit_array" => false,
-            "__libc_freeres_fn" => false,
-            "__libc_subfreeres" => false,
-            "__libc_IO_vtables" => false,
-            "__libc_atexit" => false,
-            ".got" => false,
-            "__libc_freeres_ptrs" => false,
-            _ => true
-        };
+        let skip = !matches!(name,
+            ".rela.dyn" | ".text" | ".rodata" | ".data.rel.ro" | ".data" | ".sdata" | ".tdata" |
+            ".eh_frame" | ".gcc_except_table" | ".init_array" | ".fini_array" | ".preinit_array" |
+            "__libc_freeres_fn" | "__libc_subfreeres" | "__libc_IO_vtables" | "__libc_atexit" |
+            ".got" | "__libc_freeres_ptrs");
 
 
         if args.verbose {
@@ -144,23 +137,22 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
         if args.verbose {
             write!(&mut stdout, "[{:8x}]:\t", cpu.pc).unwrap();
             inst.print(&mut stdout, cpu.pc).unwrap();
-            write!(&mut stdout, "\n").unwrap();
+            writeln!(&mut stdout).unwrap();
         }
         inst.exec(inst_size, &mut cpu);
         if args.verbose && cpu.pc != old_pc + inst_size {
-            if inst.is_ret() && call_stack.len() > 0 {
+            if inst.is_ret() && !call_stack.is_empty() {
                 call_stack.pop();
             }
 
-            // let (name, start) = syms::get_symbol(&symbols, cpu.pc as u64).unwrap_or(("???", 0));
             let (name, start) = symbol_tree.lookup(cpu.pc as u64).unwrap_or(("???", 0));
             if inst.is_call() {
                 call_stack.push(name);
             }
-            write!(&mut stdout, "[simrv64i]: {} + {:#x}\n",
+            writeln!(&mut stdout, "[simrv64i]: {} + {:#x}",
                    name, cpu.pc as u64 - start).unwrap();
             if (inst.is_call() && start == cpu.pc as u64) || inst.is_ret() {
-                write!(&mut stdout, "[simrv64i]: call-stack: {:?}\n", call_stack).unwrap();
+                writeln!(&mut stdout, "[simrv64i]: call-stack: {:?}", call_stack).unwrap();
             }
         }
     }
@@ -197,7 +189,7 @@ fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Ve
     while offset + 2 < textsectionhdr.sh_size as usize {
         let addr = textsectionhdr.sh_addr as usize + offset;
         let raw =
-            ((bytes[offset + 0] as u32) <<  0) |
+            (bytes[offset] as u32) |
             ((bytes[offset + 1] as u32) <<  8) |
             ((bytes[offset + 2] as u32) << 16) |
             ((bytes[offset + 3] as u32) << 24);
@@ -214,12 +206,12 @@ fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Ve
 
         if size == 2 {
             let raw =
-                ((bytes[offset + 0] as u32) << 0) |
+                (bytes[offset] as u32) |
                 ((bytes[offset + 1] as u32) << 8);
             write!(&mut stdout, "{:8x}:\t{:04x}     \t", addr, raw)?;
         } else if size == 4 {
             let raw =
-                ((bytes[offset + 0] as u32) << 0) |
+                (bytes[offset] as u32) |
                 ((bytes[offset + 1] as u32) << 8) |
                 ((bytes[offset + 2] as u32) << 16) |
                 ((bytes[offset + 3] as u32) << 24);
@@ -229,7 +221,7 @@ fn dump_text_section(elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Ve
         }
 
         inst.print(&mut stdout, addr as i64)?;
-        write!(&mut stdout, "\n")?;
+        writeln!(&mut stdout)?;
         offset += size;
     }
 
@@ -259,8 +251,7 @@ fn main() {
     if elf_file.ehdr.class != elf::file::Class::ELF64
         || elf_file.ehdr.e_type != elf::abi::ET_EXEC
         || elf_file.ehdr.e_machine != elf::abi::EM_RISCV {
-        eprintln!("[simrv64i]: error processing ELF file {:?}: {}", &args.file,
-            "class needs to be 64, type needs to be executable, and machine needs to be RISC-V");
+        eprintln!("[simrv64i]: error processing ELF file {:?}: Not a RV64 executable", &args.file);
         std::process::exit(1);
     }
 
@@ -271,7 +262,6 @@ fn main() {
 
     if args.exec {
         execute(&args, elf_file, &raw_file);
-        return;
     }
 }
 

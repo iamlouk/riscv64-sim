@@ -8,3 +8,4 @@ authors = ["Lou Knauer <lou.knauer98@gmail.com>"]
 syscalls = { version = "0.6" }
 elf = { version = "0.7" }
 clap = { version = "4.3.14", features = ["derive"] }
+iced-x86 = { version = "1.21.0", features = ["code_asm"] }

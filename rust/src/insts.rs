@@ -1,3 +1,6 @@
+#![allow(clippy::identity_op)]
+#![allow(clippy::eq_op)]
+
 use crate::cpu;
 
 pub type Reg = u8;
@@ -341,11 +344,11 @@ fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
     Ok((match raw & 0x0000007f {
         0b0110111 => Inst::LoadUpperImmediate {
             dst: get_rd(raw),
-            imm: (raw & 0xfffff000) as u32
+            imm: raw & 0xfffff000
         },
         0b0010111 => Inst::AddUpperImmediateToPC {
             dst: get_rd(raw),
-            imm: (raw & 0xfffff000) as u32
+            imm: raw & 0xfffff000
         },
         0b1101111 => Inst::JumpAndLink {
             dst: get_rd(raw),
@@ -588,7 +591,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
                 1 => cpu.memory.load_u8(addr)  as u64,
                 2 => cpu.memory.load_u16(addr) as u64,
                 4 => cpu.memory.load_u32(addr) as u64,
-                8 => cpu.memory.load_u64(addr) as u64,
+                8 => cpu.memory.load_u64(addr),
                 _ => unimplemented!()
             });
         },
@@ -598,7 +601,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
                 1 => cpu.memory.load_u8(addr) as i8 as i64 as u64,
                 2 => cpu.memory.load_u16(addr) as i16 as i64 as u64,
                 4 => cpu.memory.load_u32(addr) as i32 as i64 as u64,
-                8 => cpu.memory.load_u64(addr) as i64 as i64 as u64,
+                8 => cpu.memory.load_u64(addr) as i64 as u64,
                 _ => unimplemented!()
             });
         },
@@ -609,7 +612,7 @@ fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) {
                 1 => cpu.memory.store_u8(addr, val as u8),
                 2 => cpu.memory.store_u16(addr, val as u16),
                 4 => cpu.memory.store_u32(addr, val as u32),
-                8 => cpu.memory.store_u64(addr, val as u64),
+                8 => cpu.memory.store_u64(addr, val),
                 _ => unimplemented!()
             }
         },
@@ -722,18 +725,14 @@ impl Inst {
     }
 
     pub fn is_call(&self) -> bool {
-        match self {
-            Inst::JumpAndLink { dst: REG_RA, offset: _ } => true,
-            Inst::JumpAndLinkReg { dst: REG_RA, base: _, offset: _ } => true,
-            _ => false
-        }
+        matches!(self,
+            Inst::JumpAndLink { dst: REG_RA, offset: _ } |
+            Inst::JumpAndLinkReg { dst: REG_RA, base: _, offset: _ })
     }
 
     pub fn is_ret(&self) -> bool {
-        match self {
-            Inst::JumpAndLinkReg { dst: REG_ZR, base: REG_RA, offset: 0 } => true,
-            _ => false
-        }
+        matches!(self,
+            Inst::JumpAndLinkReg { dst: REG_ZR, base: REG_RA, offset: 0 })
     }
 }
 
