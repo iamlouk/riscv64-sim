@@ -31,7 +31,9 @@ struct Args {
     jit: bool,
 
     #[arg(short, long)]
-    tb_stats: bool
+    tb_stats: bool,
+
+    args: Vec<String>
 }
 
 fn dump_hottest_tbs(elf_file: &elf::ElfBytes<'_, elf::endian::AnyEndian>, jit: &tbs::JIT) {
@@ -65,7 +67,10 @@ fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: 
     assert!(stderr_dupped != -1);
     cpu.remapped_filenos.insert(2, stderr_dupped as usize);
 
-    match cpu.load_and_exec(&elf_file) {
+    let mut argv: Vec<&str> = args.args.iter().map(|s| s.as_str()).collect();
+    argv.insert(0, args.file.as_str());
+
+    match cpu.load_and_exec(&elf_file, Some(argv)) {
         Ok((exitcode, jit)) => {
             if args.tb_stats {
                 dump_hottest_tbs(&elf_file, &jit);
@@ -185,7 +190,9 @@ mod test {
     use std::os::fd::FromRawFd;
     use std::path::PathBuf;
 
-    fn run_elf_binary(filename: &str, stdin: Option<&[u8]>) -> (String, i32) {
+    fn run_elf_binary(
+            filename: &str, argv: Option<Vec<&str>>,
+            stdin: Option<&[u8]>) -> (String, i32) {
         let mut filepath = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         filepath.push(filename);
 
@@ -224,7 +231,7 @@ mod test {
             example_stdin_file.write_all(stdin).unwrap();
         }
 
-        let (exitcode, _) = cpu.load_and_exec(&elf_file).unwrap();
+        let (exitcode, _) = cpu.load_and_exec(&elf_file, argv).unwrap();
 
         let mut example_stdout_file = unsafe { std::fs::File::from_raw_fd(stdout_pipe[0]) };
         let mut example_stdout = String::new();
@@ -235,23 +242,26 @@ mod test {
 
     #[test]
     fn example_hello_world() {
-        let (stdout, exitcode) = run_elf_binary("./examples/hello-world.elf", None);
+        let argv = vec!["hello-world.elf", "foo"];
+        let (stdout, exitcode) = run_elf_binary("./examples/hello-world.elf", Some(argv), None);
         assert_eq!(exitcode, 42);
-        assert_eq!(stdout.as_str(), "Hello, World! (argc=0)\n");
+        assert_eq!(stdout.as_str(),
+            "Hello, World! (argc=2)\nargv[0] = 'hello-world.elf'\nargv[1] = 'foo'\n");
     }
 
     #[test]
     fn example_bubblesort() {
         let input = "8\n3\n5\n6\n9\n1\n4\n2\n7\n";
         let (stdout, exitcode) = run_elf_binary(
-            "./examples/bubblesort.elf", Some(input.as_bytes()));
+            "./examples/bubblesort.elf", None, Some(input.as_bytes()));
         assert_eq!(exitcode, 0);
         assert_eq!(stdout.as_str(), "1\n2\n3\n4\n5\n6\n7\n8\n9\n");
     }
 
     #[test]
     fn example_nqueens() {
-        let (stdout, exitcode) = run_elf_binary("./examples/nqueens.elf", None);
+        let argv = vec!["nqueens.elf", "8"];
+        let (stdout, exitcode) = run_elf_binary("./examples/nqueens.elf", Some(argv), None);
         assert_eq!(exitcode, 0);
         assert_eq!(stdout.as_str(), "#solutions: 92 (grid_size=8)\n");
     }

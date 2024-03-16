@@ -30,8 +30,9 @@ impl CPU {
     }
 
     pub fn load_and_exec(
-            &mut self, elf_file: &elf::ElfBytes<'_, elf::endian::AnyEndian>)
-                -> Result<(i32, JIT), Error> {
+            &mut self,
+            elf_file: &elf::ElfBytes<'_, elf::endian::AnyEndian>,
+            argv: Option<Vec<&str>>) -> Result<(i32, JIT), Error> {
         self.pc = elf_file.ehdr.e_entry as i64;
         let (sections, _) = elf_file
             .section_headers_with_strtab()
@@ -54,9 +55,26 @@ impl CPU {
             }
         }
 
-        /* TODO: There must be a better way... */
-        let top_of_stack = 0x10000u64;
-        self.set_reg(REG_SP, top_of_stack);
+        /* TODO: There must be a better way... What address to use as TOS? */
+        let top_of_stack = 0x10000u64 as usize;
+        self.set_reg(REG_SP, top_of_stack as u64);
+        if let Some(argv) = argv {
+            eprintln!("argv: {:?}", argv);
+            let argc = argv.len();
+            let argv_size: usize = argv.iter().map(|s| s.len() + 1).sum();
+            self.memory.store_u64(top_of_stack, argc as u64);
+
+            let mut argv_pos = top_of_stack + (2  + argv.len()) * 8 + argv_size;
+            for i in 0..argc {
+                self.memory.store_u64(top_of_stack + (1 + i) * 8, argv_pos as u64);
+                for (j, c) in argv[i].as_bytes().iter().enumerate() {
+                    self.memory.store_u8(argv_pos + j, *c);
+                }
+                argv_pos += argv[i].as_bytes().len();
+                self.memory.store_u8(argv_pos, b'\0');
+                argv_pos += 1;
+            }
+        }
 
         let mut jit = JIT::new();
         let exitcode = loop {
