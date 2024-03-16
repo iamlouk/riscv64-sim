@@ -8,23 +8,24 @@ use syscalls::{syscall, Sysno};
 const MAX_ADDR: usize = 1 << 24;
 
 #[repr(C)]
-pub struct CPU<'io> {
+pub struct CPU {
     pub pc: i64,
     pub regs: [u64; 32],
     pub fregs: [u64; 32],
     pub memory: Memory,
-    pub capture_filenos: std::collections::HashMap<usize,
-            (Option<&'io mut dyn std::io::Write>, Option<&'io mut dyn std::io::Read>)>
+    pub remapped_filenos: std::collections::HashMap<usize, usize>,
+    pub debug_syscalls: bool
 }
 
-impl<'io> CPU<'io> {
+impl CPU {
     pub fn new() -> Self {
         CPU {
             pc: 0,
             regs: [0x0; 32],
             fregs: [0xffffffffffffffff; 32],
             memory: Memory::new(),
-            capture_filenos: std::collections::HashMap::new()
+            remapped_filenos: std::collections::HashMap::new(),
+            debug_syscalls: true
         }
     }
 
@@ -86,7 +87,7 @@ impl<'io> CPU<'io> {
             let (instr, size) = Inst::parse(raw)?;
             tb_size += size;
             let ends_tb = instr.is_terminator();
-            jit.buffer.push((instr, size as u8));
+            jit.buffer.push((instr.simplify(), size as u8));
             if ends_tb {
                 break;
             }
@@ -101,7 +102,7 @@ impl<'io> CPU<'io> {
             label: syms.and_then(|s| s
                 .lookup(start_pc)
                 .filter(|(_, start)| *start == start_pc)
-                .map(|(name, _)| name.to_owned())),
+                .map(|(name, _)| std::rc::Rc::from(name))),
         };
 
         for (inst, size) in &tb.instrs {
@@ -171,39 +172,64 @@ impl<'io> CPU<'io> {
         // the arguments are the same and that the rust crate `syscalls` are those of the host.
         let syscall = self.get_reg(REG_A7);
         let res = match syscall {
-            RISCV_SYSNO_CLOSE => syscall!(Sysno::close, a0),
-            RISCV_SYSNO_READ => {
-                let addr = self.memory.data.as_ptr().add(a1);
-                if let Some((_, Some(r))) = self.capture_filenos.get(&a0) {
-                    let _ = r;
-                    todo!()
+            RISCV_SYSNO_CLOSE => {
+                let fd = self.remapped_filenos.get(&a0).cloned().unwrap_or(a0);
+                let res = syscall!(Sysno::close, fd);
+                if self.debug_syscalls {
+                    eprintln!("[simrv64i]: syscall: `close`({}) -> {:?}", fd, res);
                 }
-                syscall!(Sysno::read, a0, addr as usize, a2)
+                res
+            },
+            RISCV_SYSNO_READ => {
+                let fd = self.remapped_filenos.get(&a0).cloned().unwrap_or(a0);
+                let addr = self.memory.data.as_ptr().add(a1);
+                let res = syscall!(Sysno::read, fd, addr as usize, a2);
+                if self.debug_syscalls {
+                    eprintln!("[simrv64i]: syscall: `read`({}, {:?}, {}) -> {:?}",
+                        fd, addr, a2, res);
+                }
+                res
             },
             RISCV_SYSNO_WRITE => {
-                if let Some((Some(w), _)) = self.capture_filenos.get_mut(&a0) {
-                    /* TODO: Transform std::io::Error back to a errno? */
-                    match w.write(&self.memory.data[a1..(a1 + a2)]) {
-                        Ok(n) => Ok(n),
-                        Err(e) => return Err(Error::IO(e))
-                    }
-                } else {
-                    let addr = self.memory.data.as_ptr().add(a1);
-                    syscall!(Sysno::write, a0, addr as usize, a2)
+                let fd = self.remapped_filenos.get(&a0).cloned().unwrap_or(a0);
+                let addr = self.memory.data.as_ptr().add(a1);
+                let res = syscall!(Sysno::write, fd, addr as usize, a2);
+                if self.debug_syscalls {
+                    eprintln!("[simrv64i]: syscall: `write`({}, {:?}, {}) -> {:?}",
+                        fd, addr, a2, res);
                 }
+                res
             },
             RISCV_SYSNO_NEWFSTAT => {
+                let fd = self.remapped_filenos.get(&a0).cloned().unwrap_or(a0);
                 let addr = self.memory.data.as_ptr().add(a1);
-                syscall!(Sysno::newfstatat, a0, addr as usize)
+                let res = syscall!(Sysno::newfstatat, fd, addr as usize);
+                if self.debug_syscalls {
+                    eprintln!("[simrv64i]: syscall: `newfstat`({}, {:?}) -> {:?}",
+                        fd, addr, res);
+                }
+                res
             },
-            RISCV_SYSNO_EXIT => return Err(Error::Exit(a0 as i32)),
+            RISCV_SYSNO_EXIT => {
+                if self.debug_syscalls {
+                    eprintln!("[simrv64i]: syscall: `exit`({:#08x}) -> !", a0);
+                }
+                return Err(Error::Exit(a0 as i32))
+            },
             RISCV_SYSNO_BRK => {
-                eprintln!("[simrv64i]: VM did syscall `BRK` (ignored)");
+                if self.debug_syscalls {
+                    eprintln!("[simrv64i]: syscall: `brk` (ignored)");
+                }
                 Ok(0)
             },
             RISCV_SYSNO_OPEN => {
                 let filepath = self.memory.data.as_ptr().add(a0);
-                syscall!(Sysno::open, filepath as usize, a1)
+                let res = syscall!(Sysno::open, filepath as usize, a1);
+                if self.debug_syscalls {
+                    eprintln!("[simrv64i]: syscall: `open`({:?}, {}) -> {:?}",
+                        std::ffi::CStr::from_ptr(filepath as *const i8), a1, res);
+                }
+                res
             },
             _ => todo!()
         };

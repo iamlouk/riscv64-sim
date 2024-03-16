@@ -13,7 +13,6 @@ pub const REG_A1: Reg = 11;
 pub const REG_A2: Reg = 12;
 pub const REG_A7: Reg = 17;
 
-
 fn sign_extend(x: u32, nbits: u32) -> u32 {
     let notherbits = std::mem::size_of_val(&x) as u32 * 8 - nbits;
     (x as i32).wrapping_shl(notherbits).wrapping_shr(notherbits) as u32
@@ -50,6 +49,7 @@ pub enum RoundingMode {
 #[derive(Debug, Clone)]
 pub enum Inst {
     Unknown,
+    NOP,
     Load { dst: Reg, width: u8, base: Reg, offset: i32, signext: bool },
     Store { src: Reg, width: u8, base: Reg, offset: i32 },
     JumpAndLink { dst: Reg, offset: i32 },
@@ -87,6 +87,7 @@ pub enum Error {
     InvalidEncoding(&'static str),
     Unimplemented(&'static str),
     ELF(String),
+    JIT(String),
     IO(std::io::Error)
 }
 
@@ -548,12 +549,25 @@ fn parse_instruction(raw: u32) -> Result<(Inst, usize), Error> {
     }, 4))
 }
 
+fn simplify_instruction(inst: Inst) -> Inst {
+    match inst {
+        Inst::ALUImm { dst: REG_ZR, .. } => Inst::NOP,
+        Inst::ALUReg { dst: REG_ZR, .. } => Inst::NOP,
+        Inst::ALUReg { op, dst, src1, src2: REG_ZR }
+            if matches!(op, ALU::Add | ALU::AddW | ALU::Sub | ALU::SubW |
+                            ALU::And | ALU::Or) =>
+                Inst::ALUImm { op, dst, src1, imm: 0 },
+        other => other
+    }
+}
+
 fn execute_instruction(cpu: &mut cpu::CPU, inst: Inst, inst_size: i64) -> Result<(), Error> {
     fn calc_address(cpu: &cpu::CPU, base: Reg, offset: i32) -> usize {
         (cpu.get_reg(base) as i64 + offset as i64) as usize
     }
 
     match inst {
+        Inst::NOP => {},
         Inst::LoadUpperImmediate { dst, imm } => {
             cpu.set_reg(dst, imm as i32 as i64 as u64);
         },
@@ -709,6 +723,10 @@ impl Inst {
 
     pub fn exec(&self, inst_size: i64, cpu: &mut cpu::CPU) -> Result<(), Error> {
         execute_instruction(cpu, self.clone(), inst_size)
+    }
+
+    pub fn simplify(&self) -> Self {
+        simplify_instruction(self.clone())
     }
 
     pub fn is_terminator(&self) -> bool {

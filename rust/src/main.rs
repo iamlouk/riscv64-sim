@@ -9,7 +9,7 @@ mod tbs;
 
 use std::io::Write;
 
-use clap::{self, Parser};
+use clap::Parser;
 use crate::insts::Inst;
 
 #[derive(clap::Parser)]
@@ -147,32 +147,43 @@ fn main() {
 
 #[cfg(test)]
 mod test {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
     use std::path::PathBuf;
 
-    const EXAMPLES: [(&'static str, i32, &'static str); 1] = [
-        ("hello-world.elf", 42, "Hello, World! (argc=0)\n")
-    ];
+    fn run_elf_binary(filename: &str) -> (String, i32) {
+        let mut filepath = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        filepath.push(filename);
+
+        let binary_file = std::fs::read(filepath).unwrap();
+        let elf_file =
+            elf::ElfBytes::<'_, elf::endian::AnyEndian>::minimal_parse(&binary_file).unwrap();
+        assert!(elf_file.ehdr.class == elf::file::Class::ELF64
+            && elf_file.ehdr.e_type == elf::abi::ET_EXEC
+            && elf_file.ehdr.e_machine == elf::abi::EM_RISCV);
+
+        let mut cpu = crate::cpu::CPU::new();
+
+        let mut stdout_pipe: [i32; 2] = [-1, -1];
+        let ok = unsafe { libc::pipe(stdout_pipe.as_mut_ptr()) };
+        assert!(ok == 0);
+
+        cpu.remapped_filenos.insert(/*stdout:*/ 1, stdout_pipe[1] as usize);
+
+        let exitcode = cpu.load_and_exec(elf_file).unwrap();
+
+        let mut example_stdout_file = unsafe { std::fs::File::from_raw_fd(stdout_pipe[0]) };
+        let mut example_stdout = String::new();
+        example_stdout_file.read_to_string(&mut example_stdout).unwrap();
+
+        (example_stdout, exitcode)
+    }
 
     #[test]
-    fn examples() {
-        let mut root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        root_dir.push("examples/foo.txt");
-        for (filename, exitcode, expected_stdout) in EXAMPLES {
-            let binary_path = root_dir.with_file_name(filename);
-            let binary_file = std::fs::read(binary_path).unwrap();
-            let elf_file =
-                elf::ElfBytes::<'_, elf::endian::AnyEndian>::minimal_parse(&binary_file).unwrap();
-            assert!(elf_file.ehdr.class == elf::file::Class::ELF64
-                && elf_file.ehdr.e_type == elf::abi::ET_EXEC
-                && elf_file.ehdr.e_machine == elf::abi::EM_RISCV);
-
-            let mut cpu = crate::cpu::CPU::new();
-            let mut raw_stdout: Vec<u8> = Vec::new();
-            cpu.capture_filenos.insert(1, (Some(&mut raw_stdout), None));
-
-            assert_eq!(cpu.load_and_exec(elf_file).unwrap(), exitcode);
-            assert_eq!(expected_stdout.as_bytes(), raw_stdout.as_slice());
-        }
+    fn example_hello_world() {
+        let (stdout, exitcode) = run_elf_binary("./examples/hello-world.elf");
+        assert_eq!(exitcode, 42);
+        assert_eq!(stdout.as_str(), "Hello, World! (argc=0)\n");
     }
 }
 

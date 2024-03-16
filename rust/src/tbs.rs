@@ -6,7 +6,7 @@ pub struct TranslationBlock {
     pub size:       u64,
     pub exec_count: std::sync::atomic::AtomicI64,
     pub valid:      bool,
-    pub label:      Option<String>,
+    pub label:      Option<std::rc::Rc<str>>,
     pub instrs:     Vec<(Inst, u8)>,
 }
 
@@ -20,7 +20,9 @@ impl JIT {
         Self {
             tbs: std::collections::HashMap::with_capacity(1024),
             buffer : Vec::with_capacity(32),
+
         }
     }
 }
+
 
