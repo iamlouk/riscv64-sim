@@ -80,6 +80,7 @@ pub enum Inst {
     // ones in order to make a rv64g libc printf work.
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum Error {
     Illegal,

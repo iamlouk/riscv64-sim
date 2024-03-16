@@ -39,7 +39,7 @@ impl CPU {
             .map_err(|e| Error::ELF(format!("{}", e)))
             .map(|(sections, strtab)| (sections.unwrap(), strtab))?;
 
-        let _symbols = syms::SymbolTreeNode::build(&syms::get_symbols(&elf_file));
+        let _symbols = syms::SymbolTreeNode::build(&syms::get_symbols(elf_file));
 
         for section in sections {
             if section.sh_flags & (elf::abi::SHF_ALLOC as u64) != 0 {
@@ -59,18 +59,28 @@ impl CPU {
         let top_of_stack = 0x10000u64 as usize;
         self.set_reg(REG_SP, top_of_stack as u64);
         if let Some(argv) = argv {
-            eprintln!("argv: {:?}", argv);
+            /*
+             * Setup argv for the guest.
+             * Layout (argv is not passed like a normal function call argument!):
+             *   - memory[TOS] = argc;
+             *   - memory[TOS + 8] = argv[0];
+             *   - memory[TOS + 16] = argv[1];
+             *   - memory[TOS + 24] = argv[2];
+             *   - ...
+             * The individual strings that make up argv are after argv itself,
+             * so in addresses higher than TOS (stack grows downwards after all).
+             */
             let argc = argv.len();
             let argv_size: usize = argv.iter().map(|s| s.len() + 1).sum();
             self.memory.store_u64(top_of_stack, argc as u64);
 
             let mut argv_pos = top_of_stack + (2  + argv.len()) * 8 + argv_size;
-            for i in 0..argc {
+            for (i, arg) in argv.iter().enumerate() {
                 self.memory.store_u64(top_of_stack + (1 + i) * 8, argv_pos as u64);
-                for (j, c) in argv[i].as_bytes().iter().enumerate() {
+                for (j, c) in arg.as_bytes().iter().enumerate() {
                     self.memory.store_u8(argv_pos + j, *c);
                 }
-                argv_pos += argv[i].as_bytes().len();
+                argv_pos += arg.as_bytes().len();
                 self.memory.store_u8(argv_pos, b'\0');
                 argv_pos += 1;
             }
@@ -91,10 +101,28 @@ impl CPU {
 
     pub fn step(&mut self, jit: &mut JIT, syms: Option<&syms::SymbolTreeNode>)
             -> Result<u64, Error> {
+        /* Check if this TB was already executed:
+         * TODO: Link TBs together, with successor pointers, so that we don't have
+         * to do a lookup into a hashmap so often....
+         */
         if let Some(tb) = jit.tbs.get(&self.pc) {
-            tb.exec_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            // print!("[simrv64i] re-running TB at {:#08x}, count: {}\n",
-            //        self.pc, *tb.exec_count.borrow());
+            let count = tb.exec_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Some(f) = tb.jit_fn {
+                /* We have a JITed version of this TB! */
+                let pc = f(self.regs.as_mut_ptr(), self.memory.data.as_mut_ptr());
+                self.pc = pc as i64;
+                return Ok(pc)
+            }
+
+            if !tb.jit_failed && count > TB_KICK_IN_JIT {
+                unsafe {
+                    /* Bypass the borrow checker: The better design that avoids this would
+                     * be not to have the JIT own the TBs.
+                     */
+                    (*(jit as *const JIT as *mut JIT)).kick_in()
+                };
+            }
+
             for (inst, size) in &tb.instrs {
                 inst.exec(*size as i64, self)?;
             }
@@ -125,6 +153,9 @@ impl CPU {
                 .lookup(start_pc)
                 .filter(|(_, start)| *start == start_pc)
                 .map(|(name, _)| std::rc::Rc::from(name))),
+
+            jit_failed: false,
+            jit_fn: None
         };
 
         for (inst, size) in &tb.instrs {
@@ -198,7 +229,7 @@ impl CPU {
                 let fd = self.remapped_filenos.get(&a0).cloned().unwrap_or(a0);
                 let res = syscall!(Sysno::close, fd);
                 if self.debug_syscalls {
-                    eprintln!("[simrv64i]: syscall: `close`({}) -> {:?}", fd, res);
+                    eprintln!("[simrv64i] syscall: `close`({}) -> {:?}", fd, res);
                 }
                 res
             },
@@ -207,7 +238,7 @@ impl CPU {
                 let addr = self.memory.data.as_ptr().add(a1);
                 let res = syscall!(Sysno::read, fd, addr as usize, a2);
                 if self.debug_syscalls {
-                    eprintln!("[simrv64i]: syscall: `read`({}, {:?}, {}) -> {:?}",
+                    eprintln!("[simrv64i] syscall: `read`({}, {:?}, {}) -> {:?}",
                         fd, addr, a2, res);
                 }
                 res
@@ -217,7 +248,7 @@ impl CPU {
                 let addr = self.memory.data.as_ptr().add(a1);
                 let res = syscall!(Sysno::write, fd, addr as usize, a2);
                 if self.debug_syscalls {
-                    eprintln!("[simrv64i]: syscall: `write`({}, {:?}, {}) -> {:?}",
+                    eprintln!("[simrv64i] syscall: `write`({}, {:?}, {}) -> {:?}",
                         fd, addr, a2, res);
                 }
                 res
@@ -227,20 +258,20 @@ impl CPU {
                 let addr = self.memory.data.as_ptr().add(a1);
                 let res = syscall!(Sysno::newfstatat, fd, addr as usize);
                 if self.debug_syscalls {
-                    eprintln!("[simrv64i]: syscall: `newfstat`({}, {:?}) -> {:?}",
+                    eprintln!("[simrv64i] syscall: `newfstat`({}, {:?}) -> {:?}",
                         fd, addr, res);
                 }
                 res
             },
             RISCV_SYSNO_EXIT => {
                 if self.debug_syscalls {
-                    eprintln!("[simrv64i]: syscall: `exit`({:#08x}) -> !", a0);
+                    eprintln!("[simrv64i] syscall: `exit`({:#08x}) -> !", a0);
                 }
                 return Err(Error::Exit(a0 as i32))
             },
             RISCV_SYSNO_BRK => {
                 if self.debug_syscalls {
-                    eprintln!("[simrv64i]: syscall: `brk` (ignored)");
+                    eprintln!("[simrv64i] syscall: `brk` (ignored)");
                 }
                 Ok(0)
             },
@@ -248,7 +279,7 @@ impl CPU {
                 let filepath = self.memory.data.as_ptr().add(a0);
                 let res = syscall!(Sysno::open, filepath as usize, a1);
                 if self.debug_syscalls {
-                    eprintln!("[simrv64i]: syscall: `open`({:?}, {}) -> {:?}",
+                    eprintln!("[simrv64i] syscall: `open`({:?}, {}) -> {:?}",
                         std::ffi::CStr::from_ptr(filepath as *const i8), a1, res);
                 }
                 res

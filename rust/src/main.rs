@@ -1,3 +1,4 @@
+#![feature(fs_try_exists)]
 #![allow(clippy::just_underscores_and_digits)]
 #![allow(clippy::upper_case_acronyms)]
 
@@ -190,11 +191,20 @@ mod test {
     use std::os::fd::FromRawFd;
     use std::path::PathBuf;
 
-    fn run_elf_binary(
+    fn run_example(
             filename: &str, argv: Option<Vec<&str>>,
             stdin: Option<&[u8]>) -> (String, i32) {
         let mut filepath = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         filepath.push(filename);
+
+        if !std::fs::try_exists(&filepath).unwrap() {
+            let cmd = format!("make -C {} {}",
+                filepath.parent().unwrap().to_str().unwrap(),
+                filepath.file_name().unwrap().to_str().unwrap());
+            assert_eq!(unsafe {
+                libc::system(cmd.as_ptr() as *const i8)
+            }, 0);
+        }
 
         let binary_file = std::fs::read(filepath).unwrap();
         let elf_file =
@@ -243,7 +253,7 @@ mod test {
     #[test]
     fn example_hello_world() {
         let argv = vec!["hello-world.elf", "foo"];
-        let (stdout, exitcode) = run_elf_binary("./examples/hello-world.elf", Some(argv), None);
+        let (stdout, exitcode) = run_example("./examples/hello-world.elf", Some(argv), None);
         assert_eq!(exitcode, 42);
         assert_eq!(stdout.as_str(),
             "Hello, World! (argc=2)\nargv[0] = 'hello-world.elf'\nargv[1] = 'foo'\n");
@@ -252,7 +262,7 @@ mod test {
     #[test]
     fn example_bubblesort() {
         let input = "8\n3\n5\n6\n9\n1\n4\n2\n7\n";
-        let (stdout, exitcode) = run_elf_binary(
+        let (stdout, exitcode) = run_example(
             "./examples/bubblesort.elf", None, Some(input.as_bytes()));
         assert_eq!(exitcode, 0);
         assert_eq!(stdout.as_str(), "1\n2\n3\n4\n5\n6\n7\n8\n9\n");
@@ -261,7 +271,7 @@ mod test {
     #[test]
     fn example_nqueens() {
         let argv = vec!["nqueens.elf", "8"];
-        let (stdout, exitcode) = run_elf_binary("./examples/nqueens.elf", Some(argv), None);
+        let (stdout, exitcode) = run_example("./examples/nqueens.elf", Some(argv), None);
         assert_eq!(exitcode, 0);
         assert_eq!(stdout.as_str(), "#solutions: 92 (grid_size=8)\n");
     }
