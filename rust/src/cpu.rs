@@ -25,12 +25,13 @@ impl CPU {
             fregs: [0xffffffffffffffff; 32],
             memory: Memory::new(),
             remapped_filenos: std::collections::HashMap::new(),
-            debug_syscalls: true
+            debug_syscalls: true,
         }
     }
 
     pub fn load_and_exec(
-            &mut self, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>) -> Result<i32, Error> {
+            &mut self, elf_file: &elf::ElfBytes<'_, elf::endian::AnyEndian>)
+                -> Result<(i32, JIT), Error> {
         self.pc = elf_file.ehdr.e_entry as i64;
         let (sections, _) = elf_file
             .section_headers_with_strtab()
@@ -58,13 +59,16 @@ impl CPU {
         self.set_reg(REG_SP, top_of_stack);
 
         let mut jit = JIT::new();
-        loop {
+        let exitcode = loop {
             match self.step(&mut jit, None) {
                 Ok(_) => continue,
-                Err(Error::Exit(exitcode)) => return Ok(exitcode),
+                Err(Error::Exit(exitcode)) => break exitcode,
                 Err(e) => return Err(e)
             }
-        }
+        };
+
+
+        Ok((exitcode, jit))
     }
 
     pub fn step(&mut self, jit: &mut JIT, syms: Option<&syms::SymbolTreeNode>)

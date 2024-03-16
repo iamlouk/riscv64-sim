@@ -20,7 +20,6 @@ impl JIT {
         Self {
             tbs: std::collections::HashMap::with_capacity(1024),
             buffer : Vec::with_capacity(32),
-
         }
     }
 }

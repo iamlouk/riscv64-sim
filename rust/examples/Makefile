@@ -8,11 +8,11 @@
 	  | sed -e 's/\s*$//' > $@
 
 %.elf: %.c
-	riscv64-elf-gcc -mabi=lp64 -march=rv64imac -O1 -static -o $@ $<
+	riscv64-elf-gcc -Wall -Werror -mabi=lp64 -march=rv64imac -g -O1 -static -o $@ $<
 
 .PHONY: all clean
 
-all: hello-world.elf
+all: hello-world.elf bubblesort.elf nqueens.elf
 
 clean:
 	rm -rf ./*.elf ./*.dump

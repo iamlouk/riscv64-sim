@@ -28,14 +28,48 @@ struct Args {
     verbose: bool,
 
     #[arg(short, long)]
-    jit: bool
+    jit: bool,
+
+    #[arg(short, long)]
+    tb_stats: bool
+}
+
+fn dump_hottest_tbs(elf_file: &elf::ElfBytes<'_, elf::endian::AnyEndian>, jit: &tbs::JIT) {
+    let _ = elf_file;
+    const MIN_TB_FREQ: i64 = 5;
+    let mut tbs = jit.tbs
+        .values()
+        .filter_map(|tb| {
+            let freq = tb.exec_count.load(std::sync::atomic::Ordering::Relaxed);
+            if freq > MIN_TB_FREQ {
+                Some((freq, tb))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    tbs.sort_by(|(f1, _), (f2, _)| f2.cmp(f1));
+    eprintln!("[simrv64i] JIT: TBs, #total={}, #freq-above-{}={}",
+        jit.tbs.len(), MIN_TB_FREQ, tbs.len());
+    for (i, (freq, tb)) in tbs.into_iter().take(25).enumerate() {
+        eprintln!("[simrv64i] JIT: Top-TB #{:08?}: {:#08x?} (freq={})", i, tb.start, freq);
+    }
 }
 
 fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
     let _ = args;
     let mut cpu = cpu::CPU::new();
-    match cpu.load_and_exec(elf_file) {
-        Ok(exitcode) => {
+
+    /* Avoid that the guest closes stderr. */
+    let stderr_dupped = unsafe { libc::dup(2) };
+    assert!(stderr_dupped != -1);
+    cpu.remapped_filenos.insert(2, stderr_dupped as usize);
+
+    match cpu.load_and_exec(&elf_file) {
+        Ok((exitcode, jit)) => {
+            if args.tb_stats {
+                dump_hottest_tbs(&elf_file, &jit);
+            }
             std::process::exit(exitcode);
         },
         Err(e) => {
@@ -147,11 +181,11 @@ fn main() {
 
 #[cfg(test)]
 mod test {
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::os::fd::FromRawFd;
     use std::path::PathBuf;
 
-    fn run_elf_binary(filename: &str) -> (String, i32) {
+    fn run_elf_binary(filename: &str, stdin: Option<&[u8]>) -> (String, i32) {
         let mut filepath = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         filepath.push(filename);
 
@@ -164,13 +198,33 @@ mod test {
 
         let mut cpu = crate::cpu::CPU::new();
 
-        let mut stdout_pipe: [i32; 2] = [-1, -1];
-        let ok = unsafe { libc::pipe(stdout_pipe.as_mut_ptr()) };
-        assert!(ok == 0);
+        /* Avoid that the guest closes stderr. */
+        let stderr_dupped = unsafe { libc::dup(2) };
+        assert!(stderr_dupped != -1);
+        cpu.remapped_filenos.insert(2, stderr_dupped as usize);
 
+        /* Redirect stdout to a pipe so that we can capture it.
+         * Note that if the guest writes more than the kernel is willing
+         * to buffer for us, the guest could block. Maybe read from the
+         * pipe in a parallel thread? */
+        let mut stdout_pipe: [i32; 2] = [-1, -1];
+        assert!(0 == unsafe { libc::pipe(stdout_pipe.as_mut_ptr()) });
         cpu.remapped_filenos.insert(/*stdout:*/ 1, stdout_pipe[1] as usize);
 
-        let exitcode = cpu.load_and_exec(elf_file).unwrap();
+        if let Some(stdin) = stdin {
+            let mut stdin_pipe: [i32; 2] = [-1, -1];
+            assert!(0 == unsafe { libc::pipe(stdin_pipe.as_mut_ptr()) });
+            cpu.remapped_filenos.insert(/*stdin:*/ 0, stdin_pipe[0] as usize);
+
+            /* If the input is larger than what the kernel is willing to buffer in
+             * the kernel, then this will block and the test will never finish.
+             * Solution: Write to the pipe in a parallel thread?
+             */
+            let mut example_stdin_file = unsafe { std::fs::File::from_raw_fd(stdin_pipe[1]) };
+            example_stdin_file.write_all(stdin).unwrap();
+        }
+
+        let (exitcode, _) = cpu.load_and_exec(&elf_file).unwrap();
 
         let mut example_stdout_file = unsafe { std::fs::File::from_raw_fd(stdout_pipe[0]) };
         let mut example_stdout = String::new();
@@ -181,9 +235,25 @@ mod test {
 
     #[test]
     fn example_hello_world() {
-        let (stdout, exitcode) = run_elf_binary("./examples/hello-world.elf");
+        let (stdout, exitcode) = run_elf_binary("./examples/hello-world.elf", None);
         assert_eq!(exitcode, 42);
         assert_eq!(stdout.as_str(), "Hello, World! (argc=0)\n");
+    }
+
+    #[test]
+    fn example_bubblesort() {
+        let input = "8\n3\n5\n6\n9\n1\n4\n2\n7\n";
+        let (stdout, exitcode) = run_elf_binary(
+            "./examples/bubblesort.elf", Some(input.as_bytes()));
+        assert_eq!(exitcode, 0);
+        assert_eq!(stdout.as_str(), "1\n2\n3\n4\n5\n6\n7\n8\n9\n");
+    }
+
+    #[test]
+    fn example_nqueens() {
+        let (stdout, exitcode) = run_elf_binary("./examples/nqueens.elf", None);
+        assert_eq!(exitcode, 0);
+        assert_eq!(stdout.as_str(), "#solutions: 92 (grid_size=8)\n");
     }
 }
 
