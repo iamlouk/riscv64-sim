@@ -18,13 +18,13 @@ fn sign_extend(x: u32, nbits: u32) -> u32 {
     (x as i32).wrapping_shl(notherbits).wrapping_shr(notherbits) as u32
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Predicate { EQ, NE, LT, LTU, GE, GEU }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CSR { RW, RS, RC, RWI, RSI, RCI }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ALU {
     Add, AddW, Sub, SubW, And, Or, XOr,
     SLT, SLTU,
