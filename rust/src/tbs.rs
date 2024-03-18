@@ -1,11 +1,10 @@
 use crate::insts::*;
 
-pub const TB_KICK_IN_JIT: i64 = 1_000_000;
+pub const TB_KICK_IN_JIT: i64 = 5_000;
 
 #[allow(dead_code)]
 pub struct TranslationBlock {
-    pub start:      u64,
-    pub size:       u64,
+    pub start:      i64,
     pub exec_count: std::sync::atomic::AtomicI64,
     pub valid:      bool,
     pub label:      Option<std::rc::Rc<str>>,
@@ -38,34 +37,32 @@ impl JIT {
         let ctx = gccjit::Context::default();
 
         ctx.set_optimization_level(gccjit::OptimizationLevel::Limited);
-        ctx.set_dump_initial_gimple(true);
+        // ctx.set_dump_initial_gimple(true);
         ctx.set_print_errors_to_stderr(true);
-        ctx.set_allow_unreachable_blocks(false);
-        ctx.set_debug_info(true);
-        ctx.set_program_name("tb-jit");
+        ctx.set_debug_info(false);
 
         let u8ty = ctx.new_type::<u8>();
+        let u16ty = ctx.new_type::<u16>();
         let u32ty = ctx.new_type::<u32>();
         let i32ty = ctx.new_type::<i32>();
         let u64ty = ctx.new_type::<u64>();
         let i64ty = ctx.new_type::<i64>();
 
         let mut string_buf = String::new();
-        eprintln!("[simrv64i] JIT: kicking in...");
+        // eprintln!("[simrv64i] JIT: kicking in...");
 
-        let mut jitted_tbs: Vec<(String, u64)> = Vec::new();
+        let mut jitted_tbs: Vec<(String, i64)> = Vec::new();
 
         for tb in self.tbs.values_mut().filter(|tb|
                 !tb.jit_failed && tb.jit_fn.is_none() &&
-                tb.exec_count.load(std::sync::atomic::Ordering::Relaxed) > 1_000_000) {
+                tb.exec_count.load(std::sync::atomic::Ordering::Relaxed) > 1_000) {
 
-            eprintln!("[simrv64i] JIT: TB candidate: {:#08x} (freq={})",
-                tb.start, tb.exec_count.load(std::sync::atomic::Ordering::Relaxed));
+            // eprintln!("[simrv64i] JIT: TB candidate: {:#08x} (freq={})",
+            //     tb.start, tb.exec_count.load(std::sync::atomic::Ordering::Relaxed));
 
             /* In order to test this JIT without implemnting a ton of instructions,
              * just limit this to a very specific case:
              */
-            // if tb.start != 0x00010228 { tb.jit_failed = true; continue; }
 
             string_buf.clear();
             write!(&mut string_buf, "jit_tb_{:08x}", tb.start).unwrap();
@@ -79,7 +76,7 @@ impl JIT {
              * calling the successors directly if possible.
              */
             let regs = ctx.new_parameter(None, u64ty.make_pointer(), "vm_regs");
-            let memory_base = ctx.new_parameter(None, i64ty, "vm_memory_base");
+            let memory_base = ctx.new_parameter(None, i64ty, "vm_memory");
             let f = ctx.new_function(
                 None, gccjit::FunctionType::Exported, u64ty, &[regs, memory_base],
                 string_buf.as_str(), false);
@@ -94,6 +91,13 @@ impl JIT {
                     return ctx.new_rvalue_zero(u64ty);
                 }
                 ctx.new_array_access(None, regs, ctx.new_rvalue_from_int(u64ty, reg as i32)).to_rvalue()
+            };
+            let memory_addr = |base: Reg, offset: i32| {
+                ctx.new_binary_op(None, gccjit::BinaryOp::Plus, i64ty,
+                    memory_base,
+                    ctx.new_binary_op(None, gccjit::BinaryOp::Plus, i64ty,
+                        ctx.new_cast(None, register_rval(base), i64ty),
+                        ctx.new_rvalue_from_int(i64ty, offset)))
             };
 
             for (inst, size) in &tb.instrs {
@@ -113,15 +117,22 @@ impl JIT {
                                     ALU::SRAW => gccjit::BinaryOp::RShift,
                                     _ => todo!("{:?}", inst)
                                 },
-                                u32ty,
-                                ctx.new_cast(None, register_rval(src1), u32ty),
-                                ctx.new_rvalue_from_int(u32ty, imm as i32)), u64ty));
+                                i32ty,
+                                ctx.new_cast(None, register_rval(src1), i32ty),
+                                ctx.new_rvalue_from_int(i32ty, imm as i32)), u64ty));
                     },
-                    Inst::ALUImm { op: ALU::Add, dst, src1, imm } => {
+                    Inst::ALUImm { op, dst, src1, imm } if op == ALU::Add ||
+                                                           op == ALU::SLL ||
+                                                           op == ALU::SRL => {
                         let uimm64sext = imm as i32 as i64;
                         b.add_assignment(None, register_lval(dst),
                             ctx.new_binary_op(None,
-                                gccjit::BinaryOp::Plus,
+                                match op {
+                                    ALU::Add => gccjit::BinaryOp::Plus,
+                                    ALU::SLL => gccjit::BinaryOp::LShift,
+                                    ALU::SRL => gccjit::BinaryOp::RShift,
+                                    _ => todo!("{:?}", inst)
+                                },
                                 u64ty,
                                 register_rval(src1),
                                 ctx.new_rvalue_from_long(u64ty, uimm64sext)));
@@ -150,13 +161,47 @@ impl JIT {
                             }, u64ty, register_rval(src1), register_rval(src2)));
                     },
                     Inst::Load { dst, width: 4, base, offset, signext: true } => {
-                        let addr = ctx.new_binary_op(None, gccjit::BinaryOp::Plus, i64ty,
-                            memory_base,
-                            ctx.new_binary_op(None, gccjit::BinaryOp::Plus, i64ty,
-                                ctx.new_cast(None, register_rval(base), i64ty),
-                                ctx.new_rvalue_from_int(i64ty, offset)));
-                        let value = ctx.new_bitcast(None, addr, i32ty.make_pointer()).dereference(None);
+                        let value = ctx.new_bitcast(None, memory_addr(base, offset), i32ty.make_pointer()).dereference(None);
                         b.add_assignment(None, register_lval(dst), ctx.new_cast(None, ctx.new_cast(None, value, i64ty), u64ty));
+                    },
+                    Inst::Load { dst, width: 8, base, offset, signext: _ } => {
+                        let value = ctx.new_bitcast(None, memory_addr(base, offset), u64ty.make_pointer()).dereference(None);
+                        b.add_assignment(None, register_lval(dst), value);
+                    },
+                    Inst::Store { src, width: 1, base, offset } => {
+                        let lval = ctx.new_bitcast(None, memory_addr(base, offset), u8ty.make_pointer()).dereference(None);
+                        b.add_assignment(None, lval, ctx.new_cast(None, register_rval(src), u8ty));
+                    },
+                    Inst::Store { src, width: 2, base, offset } => {
+                        let lval = ctx.new_bitcast(None, memory_addr(base, offset), u16ty.make_pointer()).dereference(None);
+                        b.add_assignment(None, lval, ctx.new_cast(None, register_rval(src), u16ty));
+                    },
+                    Inst::Store { src, width: 4, base, offset } => {
+                        let lval = ctx.new_bitcast(None, memory_addr(base, offset), u32ty.make_pointer()).dereference(None);
+                        b.add_assignment(None, lval, ctx.new_cast(None, register_rval(src), u32ty));
+                    },
+                    Inst::Store { src, width: 8, base, offset } => {
+                        let lval = ctx.new_bitcast(None, memory_addr(base, offset), u64ty.make_pointer()).dereference(None);
+                        b.add_assignment(None, lval, ctx.new_cast(None, register_rval(src), u64ty));
+                    },
+                    Inst::JumpAndLink { dst, offset } => {
+                        if dst != REG_ZR {
+                            b.add_assignment(None,
+                                register_lval(dst),
+                                ctx.new_rvalue_from_long(u64ty, pc + *size as i64));
+                        }
+                        b.end_with_return(None, ctx.new_rvalue_from_long(u64ty, pc + offset as i64));
+                    },
+                    Inst::JumpAndLinkReg { dst, base, offset } => {
+                        if dst != REG_ZR {
+                            b.add_assignment(None,
+                                register_lval(dst),
+                                ctx.new_rvalue_from_long(u64ty, pc + *size as i64));
+                        }
+                        let addr = ctx.new_binary_op(None, gccjit::BinaryOp::Plus, i64ty,
+                            ctx.new_cast(None, register_rval(base), i64ty),
+                            ctx.new_rvalue_from_long(i64ty, offset as i64));
+                        b.end_with_return(None, ctx.new_cast(None, addr, u64ty));
                     },
                     Inst::Branch { pred, src1, src2, offset } => {
                         let src1 = ctx.new_array_access(None, regs,
@@ -176,13 +221,13 @@ impl JIT {
                         let false_b = f.new_block("if_false");
                         b.end_with_conditional(None, cond, true_b, false_b);
                         true_b.end_with_return(None,
-                            ctx.new_rvalue_from_long(u64ty, pc as i64 + offset as i64));
+                            ctx.new_rvalue_from_long(u64ty, pc + offset as i64));
                         false_b.end_with_return(None,
-                            ctx.new_rvalue_from_long(u64ty, (pc + *size as u64) as i64));
+                            ctx.new_rvalue_from_long(u64ty, pc + *size as i64));
                     },
                     _ => todo!("instr: {:?}", inst)
                 }
-                pc += *size as u64;
+                pc += *size as i64;
             }
         }
 
@@ -190,7 +235,7 @@ impl JIT {
          * get the function pointer, and store it in the TB. */
         let res = ctx.compile();
         for (name, pc) in jitted_tbs {
-            let tb = self.tbs.get_mut(&(pc as i64)).unwrap();
+            let tb = self.tbs.get_mut(&pc).unwrap();
             let fnptr = res.get_function(name.as_str());
             assert!(!fnptr.is_null());
             tb.jit_fn = Some(unsafe {

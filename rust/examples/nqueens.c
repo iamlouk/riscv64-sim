@@ -32,5 +32,32 @@ int main(int argc, const char *argv[]) {
 	unsigned hist[N];
 	unsigned solutions = solve(N, 0, hist);
 	printf("#solutions: %u (grid_size=%u)\n", solutions, N);
+
+	static unsigned known_solutions[20] = {
+		[ 0] = 1,
+		[ 1] = 1,
+		[ 2] = 0,
+		[ 3] = 0,
+		[ 4] = 2,
+		[ 5] = 10,
+		[ 6] = 4,
+		[ 7] = 40,
+		[ 8] = 92,
+		[ 9] = 352,
+		[10] = 724,
+		[11] = 2680,
+		[12] = 14200,
+		[13] = 73712,
+		[14] = 365596,
+		[15] = 2279184,
+		[16] = 14772512,
+		[17] = 95815104,
+		[18] = 666090624,
+	};
+	if (N > 18 || known_solutions[N] != solutions) {
+		printf("\n---> This is wrong!!!\n");
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
 }
 

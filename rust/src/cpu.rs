@@ -14,11 +14,12 @@ pub struct CPU {
     pub fregs: [u64; 32],
     pub memory: Memory,
     pub remapped_filenos: std::collections::HashMap<usize, usize>,
-    pub debug_syscalls: bool
+    pub debug_syscalls: bool,
+    pub jit_enabled: bool
 }
 
 impl CPU {
-    pub fn new() -> Self {
+    pub fn new(jit_enabled: bool) -> Self {
         CPU {
             pc: 0,
             regs: [0x0; 32],
@@ -26,6 +27,7 @@ impl CPU {
             memory: Memory::new(),
             remapped_filenos: std::collections::HashMap::new(),
             debug_syscalls: true,
+            jit_enabled
         }
     }
 
@@ -95,12 +97,11 @@ impl CPU {
             }
         };
 
-
         Ok((exitcode, jit))
     }
 
     pub fn step(&mut self, jit: &mut JIT, syms: Option<&syms::SymbolTreeNode>)
-            -> Result<u64, Error> {
+            -> Result<i64, Error> {
         /* Check if this TB was already executed:
          * TODO: Link TBs together, with successor pointers, so that we don't have
          * to do a lookup into a hashmap so often....
@@ -109,8 +110,8 @@ impl CPU {
             let count = tb.exec_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Some(f) = tb.jit_fn {
                 /* We have a JITed version of this TB! */
-                let pc = f(self.regs.as_mut_ptr(), self.memory.data.as_mut_ptr());
-                self.pc = pc as i64;
+                let pc = f(self.regs.as_mut_ptr(), self.memory.data.as_mut_ptr()) as i64;
+                self.pc = pc;
                 return Ok(pc)
             }
 
@@ -126,46 +127,39 @@ impl CPU {
             for (inst, size) in &tb.instrs {
                 inst.exec(*size as i64, self)?;
             }
-            return Ok(self.pc as u64)
+            return Ok(self.pc)
         }
 
         jit.buffer.clear();
-        let start_pc = self.pc as u64;
-        let mut tb_size = 0;
+        let pc = self.pc;
         loop {
-            let raw = self.memory.load_u32(self.pc as usize + tb_size);
+            let raw = self.memory.load_u32(self.pc as usize);
             let (instr, size) = Inst::parse(raw)?;
-            tb_size += size;
+            let instr = instr.simplify();
+            instr.exec(size as i64, self)?;
             let ends_tb = instr.is_terminator();
-            jit.buffer.push((instr.simplify(), size as u8));
+            jit.buffer.push((instr, size as u8));
             if ends_tb {
                 break;
             }
         }
 
         let tb = TranslationBlock {
-            start: start_pc,
-            size: tb_size as u64,
+            start: pc,
             exec_count: std::sync::atomic::AtomicI64::new(1),
             valid: true,
             instrs: jit.buffer.clone(),
             label: syms.and_then(|s| s
-                .lookup(start_pc)
-                .filter(|(_, start)| *start == start_pc)
+                .lookup(pc)
+                .filter(|(_, start)| *start == pc)
                 .map(|(name, _)| std::rc::Rc::from(name))),
 
-            jit_failed: false,
+            jit_failed: !self.jit_enabled,
             jit_fn: None
         };
 
-        for (inst, size) in &tb.instrs {
-            inst.exec(*size as i64, self)?;
-        }
-
-        // print!("[simrv64i] new TB at {:#08x}, instrs: {}, size: {}\n",
-        //        start_pc, tb.instrs.len(),  tb.size);
-        jit.tbs.insert(start_pc as i64, tb);
-        Ok(start_pc)
+        jit.tbs.insert(pc, tb);
+        Ok(pc)
     }
 
     pub fn get_reg(&self, reg: Reg) -> u64 {

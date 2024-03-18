@@ -12,7 +12,7 @@
 
 .PHONY: all clean
 
-all: hello-world.elf bubblesort.elf nqueens.elf debug.elf
+all: hello-world.elf bubblesort.elf nqueens.elf
 
 clean:
 	rm -rf ./*.elf ./*.dump

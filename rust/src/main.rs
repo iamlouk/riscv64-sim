@@ -61,7 +61,7 @@ fn dump_hottest_tbs(elf_file: &elf::ElfBytes<'_, elf::endian::AnyEndian>, jit: &
 
 fn execute(args: &Args, elf_file: elf::ElfBytes<'_, elf::endian::AnyEndian>, _: &Vec<u8>) {
     let _ = args;
-    let mut cpu = cpu::CPU::new();
+    let mut cpu = cpu::CPU::new(args.jit);
 
     /* Avoid that the guest closes stderr. */
     let stderr_dupped = unsafe { libc::dup(2) };
@@ -191,6 +191,8 @@ mod test {
     use std::os::fd::FromRawFd;
     use std::path::PathBuf;
 
+    const JIT_ENABLED: bool = true;
+
     fn run_example(
             filename: &str, argv: Option<Vec<&str>>,
             stdin: Option<&[u8]>) -> (String, i32) {
@@ -213,7 +215,7 @@ mod test {
             && elf_file.ehdr.e_type == elf::abi::ET_EXEC
             && elf_file.ehdr.e_machine == elf::abi::EM_RISCV);
 
-        let mut cpu = crate::cpu::CPU::new();
+        let mut cpu = crate::cpu::CPU::new(JIT_ENABLED);
 
         /* Avoid that the guest closes stderr. */
         let stderr_dupped = unsafe { libc::dup(2) };
