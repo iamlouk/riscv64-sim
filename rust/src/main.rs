@@ -191,7 +191,7 @@ mod test {
     use std::os::fd::FromRawFd;
     use std::path::PathBuf;
 
-    const JIT_ENABLED: bool = true;
+    const JIT_ENABLED: Option<&str> = option_env!("JIT_ENABLED");
 
     fn run_example(
             filename: &str, argv: Option<Vec<&str>>,
@@ -215,7 +215,7 @@ mod test {
             && elf_file.ehdr.e_type == elf::abi::ET_EXEC
             && elf_file.ehdr.e_machine == elf::abi::EM_RISCV);
 
-        let mut cpu = crate::cpu::CPU::new(JIT_ENABLED);
+        let mut cpu = crate::cpu::CPU::new(JIT_ENABLED == Some("1"));
 
         /* Avoid that the guest closes stderr. */
         let stderr_dupped = unsafe { libc::dup(2) };
