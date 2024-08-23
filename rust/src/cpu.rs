@@ -58,7 +58,7 @@ impl CPU {
         }
 
         /* TODO: There must be a better way... What address to use as TOS? */
-        let top_of_stack = 0x10000u64 as usize;
+        let top_of_stack = MAX_ADDR - (MAX_ADDR >> 2);
         self.set_reg(REG_SP, top_of_stack as u64);
         if let Some(argv) = argv {
             /*

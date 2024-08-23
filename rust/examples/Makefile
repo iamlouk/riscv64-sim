@@ -14,11 +14,11 @@ else
 endif
 
 %.elf: %.c
-	riscv64-elf-gcc -Wall -Werror -mabi=lp64 -march=rv64imac -g -O1 -static -o $@ $<
+	riscv64-elf-gcc -Wall -mabi=lp64 -march=rv64imac -g -O1 -static -o $@ $<
 
 .PHONY: all clean
 
-all: hello-world.elf bubblesort.elf nqueens.elf
+all: hello-world.elf bubblesort.elf nqueens.elf grayscale.elf
 
 clean:
 	rm -rf ./*.elf ./*.dump

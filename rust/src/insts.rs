@@ -49,13 +49,17 @@ pub enum RoundingMode {
 #[derive(Debug, Clone)]
 pub enum Inst {
     Unknown,
-    NOP,
+    NOP, // RV does not actually have a NOP, but its still usefull as explicit entry.
+
+    // Not even the non-privileged CSRs are implemented yet.
+    #[allow(dead_code)]
+    CtrlStatusReg { op: CSR, dst: Reg, src: Reg, csr: u16 },
+
     Load { dst: Reg, width: u8, base: Reg, offset: i32, signext: bool },
     Store { src: Reg, width: u8, base: Reg, offset: i32 },
     JumpAndLink { dst: Reg, offset: i32 },
     JumpAndLinkReg { dst: Reg, base: Reg, offset: i32 },
     Branch { pred: Predicate, src1: Reg, src2: Reg, offset: i32 },
-    CtrlStatusReg { op: CSR, dst: Reg, src: Reg, csr: u16 },
     ECall { _priv: u8 },
     EBreak { _priv: u8 },
     ALUImm { op: ALU, dst: Reg, src1: Reg, imm: u32 },
@@ -759,4 +763,3 @@ impl Inst {
             Inst::JumpAndLinkReg { dst: REG_ZR, base: REG_RA, offset: 0 })
     }
 }
-

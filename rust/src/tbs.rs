@@ -1,6 +1,6 @@
 use crate::insts::*;
 
-pub const TB_KICK_IN_JIT: i64 = 5_000;
+pub const TB_KICK_IN_JIT: i64 = 1_000;
 
 #[allow(dead_code)]
 pub struct TranslationBlock {
@@ -55,7 +55,7 @@ impl JIT {
 
         for tb in self.tbs.values_mut().filter(|tb|
                 !tb.jit_failed && tb.jit_fn.is_none() &&
-                tb.exec_count.load(std::sync::atomic::Ordering::Relaxed) > 1_000) {
+                tb.exec_count.load(std::sync::atomic::Ordering::Relaxed) > 100) {
 
             // eprintln!("[simrv64i] JIT: TB candidate: {:#08x} (freq={})",
             //     tb.start, tb.exec_count.load(std::sync::atomic::Ordering::Relaxed));
